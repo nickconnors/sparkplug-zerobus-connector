@@ -15,6 +15,8 @@ Enterprise-grade connector for streaming OT/IoT data from industrial protocols (
 - **Quality Mapping**: Protocol-specific quality codes to unified quality levels
 - **Data Type Inference**: Automatic type detection and conversion
 - **Metadata Enrichment**: Site/area/line/equipment context
+- **Numeric Edge Compression**: NONE / CHANGE_ONLY / DEADBAND / SDT (Swinging Door Trending)
+- **Per-Source Overrides**: Source-level compression policy and tag regex rules
 
 ### ZeroBus Integration
 - **Per-Source Targets**: Route different sources to different Delta tables (each target table has its own queue)
@@ -536,6 +538,42 @@ normalization:
 - `plant1/production/line1/plc1/temperature/reactor_temp`
 - `plant1/production/line2/robot1/speed/conveyor_speed`
 - `site2/utilities/boiler1/pressure/steam_pressure`
+
+### Numeric Compression (SDT/Deadband/Change-Only)
+
+Compression is applied after normalization and before backpressure enqueue.
+Timestamp source for SDT decisions is the source `event_time_ms` (not ingest time).
+
+```yaml
+numeric_compression:
+  mode: sdt            # none | change_only | deadband | sdt
+  change_only: true    # applies to NONE mode + all non-numeric values
+  deadband: 0.0
+  sdt_deviation: 0.25
+  sdt_max_interval_ms: 600000
+  sdt_min_interval_ms: 0
+  rules:
+    - tag_path_regex: ".*temperature.*"
+      mode: sdt
+      sdt_deviation: 0.2
+      sdt_max_interval_ms: 300000
+    - tag_path_regex: ".*status.*"
+      mode: change_only
+```
+
+Per-source override (source config wins over global defaults):
+
+```yaml
+sources:
+  - name: plant_opcua_server
+    protocol: opcua
+    endpoint: opc.tcp://192.168.1.100:4840
+    numeric_compression:
+      mode: sdt
+      change_only: true
+      sdt_deviation: 0.1
+      sdt_max_interval_ms: 300000
+```
 
 ## REST API
 

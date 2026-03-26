@@ -113,6 +113,11 @@ sources:
   polling_interval_ms: 5000
   variable_limit: 300
   publishing_interval_ms: 1000
+  numeric_compression:
+    mode: sdt
+    change_only: true
+    sdt_deviation: 0.15
+    sdt_max_interval_ms: 300000
 - name: modbus-127-0-0-1-5020
   protocol: modbus
   endpoint: modbus://127.0.0.1:5020
@@ -189,6 +194,20 @@ zerobus:
     http_proxy: ''
     https_proxy: ''
     no_proxy: localhost,127.0.0.1
+numeric_compression:
+  mode: sdt
+  change_only: true
+  deadband: 0.0
+  sdt_deviation: 0.25
+  sdt_max_interval_ms: 600000
+  sdt_min_interval_ms: 0
+  rules:
+  - tag_path_regex: .*temperature.*
+    mode: sdt
+    sdt_deviation: 0.2
+    sdt_max_interval_ms: 300000
+  - tag_path_regex: .*status.*
+    mode: change_only
 backpressure:
   max_queue_size: 50000
   drop_policy: oldest

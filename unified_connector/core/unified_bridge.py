@@ -33,6 +33,18 @@ from unified_connector.core import targets as source_tables
 from unified_connector.sparkplug import raw_row
 from unified_connector.sparkplug.edge_node_schemas import BirthNotifier, DatabricksSql, nbirth_procedures, quoted_table
 from unified_connector.sparkplug.host import HostState, HostSupervisor
+from unified_connector.core.numeric_compression import (
+    CompressionPolicy,
+    CompressionRule,
+    NumericCompressionMode,
+    SdtState,
+    changed,
+    is_numeric,
+    meaningful_numeric_change,
+    parse_policy_dict,
+    parse_rules,
+    resolve_effective_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +81,8 @@ class UnifiedBridge:
         """
         self.config = config
         self.sources = config.get('sources', [])
+        self._source_cfg_by_name: Dict[str, Dict[str, Any]] = {}
+        self._refresh_source_lookup()
 
         # ZeroBus configuration
         self.zerobus_config = config.get('zerobus', {})
@@ -138,6 +152,13 @@ class UnifiedBridge:
         self.batch_size = self.zerobus_config.get('batch', {}).get('max_records', 1000)
         self.batch_timeout_sec = self.zerobus_config.get('batch', {}).get('timeout_seconds', 5.0)
 
+        # Numeric compression settings (global + per-source override support).
+        self.numeric_compression_cfg = config.get("numeric_compression", {}) or {}
+        self.global_compression_policy: CompressionPolicy = parse_policy_dict(self.numeric_compression_cfg)
+        self.global_compression_rules: List[CompressionRule] = parse_rules(self.numeric_compression_cfg)
+        self.last_emitted_by_key: Dict[str, Any] = {}
+        self.sdt_state_by_key: Dict[str, SdtState] = {}
+
         # Reconnection settings
         self.reconnect_enabled = True
         self.reconnect_initial_delay_sec = 1.0
@@ -174,6 +195,16 @@ class UnifiedBridge:
             'records_dropped': 0,
             'batches_sent': 0,
             'reconnections': 0,
+            'compression': {
+                'mode_default': self.global_compression_policy.mode.value,
+                'incoming': 0,
+                'emitted': 0,
+                'filtered_change_only': 0,
+                'filtered_deadband': 0,
+                'filtered_sdt': 0,
+                'forced_sdt_max_interval': 0,
+                'sdt_out_of_order_resets': 0,
+            },
         }
 
         self._shutdown = False
@@ -182,6 +213,13 @@ class UnifiedBridge:
         self._start_lock = asyncio.Lock()
 
         logger.info(f"UnifiedBridge initialized: {len(self.sources)} sources configured")
+
+    def _refresh_source_lookup(self) -> None:
+        self._source_cfg_by_name = {
+            str(s.get("name", "")): s
+            for s in self.sources
+            if isinstance(s, dict) and s.get("name")
+        }
 
 
 
@@ -928,6 +966,12 @@ class UnifiedBridge:
         # Stage 3: Capture after normalization (per-protocol-vendor)
         self.vendor_pipelines[protocol_vendor_key]['after_normalization'].append(after_norm)
 
+        # Stage 3.5: Numeric compression/filtering (uses source event time; keyed by normalized path).
+        compressed = self._apply_numeric_compression(record, record_dict)
+        if compressed is None:
+            return
+        record_dict = compressed
+
         # Enqueue for ZeroBus
         self._enqueue_fast(record_dict, queue)
 
@@ -959,6 +1003,108 @@ class UnifiedBridge:
         except asyncio.QueueFull:
             # Slow-path: fall back to async enqueue (disk spooling / drop policy)
             asyncio.create_task(self._enqueue_record(record_dict, queue))
+
+    def _resolve_compression_policy_for_record(self, source_name: str, tag_path: str) -> CompressionPolicy:
+        source_cfg = self._source_cfg_by_name.get(source_name) or {}
+        src_comp_cfg = source_cfg.get("numeric_compression", {}) if isinstance(source_cfg, dict) else {}
+        src_policy = parse_policy_dict(src_comp_cfg) if src_comp_cfg else None
+        src_rules = parse_rules(src_comp_cfg) if src_comp_cfg else []
+        return resolve_effective_policy(
+            self.global_compression_policy,
+            self.global_compression_rules,
+            src_policy,
+            src_rules,
+            tag_path,
+        )
+
+    def _compression_key(self, source_name: str, tag_path: str) -> str:
+        # Normalized key first; source-scoped to avoid accidental cross-source coupling.
+        return f"{source_name}::{tag_path}"
+
+    def _apply_numeric_compression(self, record: ProtocolRecord, record_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        source_name = str(record_dict.get("source_name") or record.source_name or "")
+        tag_path = str(record_dict.get("tag_path") or record_dict.get("topic_or_path") or "")
+        key = self._compression_key(source_name, tag_path)
+        event_time_ms = int(record.event_time_ms)
+        policy = self._resolve_compression_policy_for_record(source_name, tag_path)
+        self.metrics['compression']['incoming'] += 1
+
+        value = record_dict.get("value")
+        last = self.last_emitted_by_key.get(key)
+
+        # Non-numeric values always use change-only semantics.
+        if not is_numeric(value):
+            if not changed(last, value):
+                self.metrics['compression']['filtered_change_only'] += 1
+                return None
+            self.last_emitted_by_key[key] = value
+            self.metrics['compression']['emitted'] += 1
+            return record_dict
+
+        # Numeric modes.
+        if policy.mode == NumericCompressionMode.NONE:
+            if policy.change_only and not changed(last, value):
+                self.metrics['compression']['filtered_change_only'] += 1
+                return None
+            self.last_emitted_by_key[key] = value
+            self.metrics['compression']['emitted'] += 1
+            return record_dict
+
+        if policy.mode == NumericCompressionMode.CHANGE_ONLY:
+            if not changed(last, value):
+                self.metrics['compression']['filtered_change_only'] += 1
+                return None
+            self.last_emitted_by_key[key] = value
+            self.metrics['compression']['emitted'] += 1
+            return record_dict
+
+        if policy.mode == NumericCompressionMode.DEADBAND:
+            if not meaningful_numeric_change(last, value, policy.deadband):
+                self.metrics['compression']['filtered_deadband'] += 1
+                return None
+            self.last_emitted_by_key[key] = value
+            self.metrics['compression']['emitted'] += 1
+            return record_dict
+
+        # SDT mode.
+        if policy.mode == NumericCompressionMode.SDT:
+            # Defensive fallback for bad config values.
+            if policy.sdt_deviation <= 0:
+                if not changed(last, value):
+                    self.metrics['compression']['filtered_change_only'] += 1
+                    return None
+                self.last_emitted_by_key[key] = value
+                self.metrics['compression']['emitted'] += 1
+                return record_dict
+
+            state = self.sdt_state_by_key.setdefault(key, SdtState())
+            out = state.offer(
+                payload=record_dict,
+                t_ms=event_time_ms,
+                numeric_value=float(value),
+                deviation=policy.sdt_deviation,
+                max_interval_ms=max(0, int(policy.sdt_max_interval_ms)),
+                min_interval_ms=max(0, int(policy.sdt_min_interval_ms)),
+            )
+            if out.filtered or out.emit_payload is None:
+                self.metrics['compression']['filtered_sdt'] += 1
+                return None
+
+            if out.forced_by_max_interval:
+                self.metrics['compression']['forced_sdt_max_interval'] += 1
+            if out.reset_due_to_out_of_order:
+                self.metrics['compression']['sdt_out_of_order_resets'] += 1
+
+            emitted_payload = dict(out.emit_payload)
+            emitted_value = emitted_payload.get("value")
+            self.last_emitted_by_key[key] = emitted_value
+            self.metrics['compression']['emitted'] += 1
+            return emitted_payload
+
+        # Unknown mode fallback: emit.
+        self.last_emitted_by_key[key] = value
+        self.metrics['compression']['emitted'] += 1
+        return record_dict
 
     def _protocol_record_to_raw_data(self, record: ProtocolRecord) -> Dict[str, Any]:
         """Convert ProtocolRecord to raw data format for normalizers.
@@ -1399,6 +1545,7 @@ class UnifiedBridge:
 
         # Add to internal sources list
         self.sources.append(full_config)
+        self._refresh_source_lookup()
 
         # Start the client if bridge is running
         if self.running and not self._shutdown:
@@ -1408,6 +1555,7 @@ class UnifiedBridge:
             except Exception as e:
                 # Remove from sources list if start failed
                 self.sources.remove(full_config)
+                self._refresh_source_lookup()
                 logger.error(f"Failed to start source '{source_name}': {e}")
                 raise ValueError(f"Failed to start source: {e}")
         else:
@@ -1434,6 +1582,7 @@ class UnifiedBridge:
 
         # Remove from sources list (in place: the web server lists the same list)
         self.sources[:] = [s for s in self.sources if s.get('name') != source_name]
+        self._refresh_source_lookup()
 
         logger.info(f"✓ Source '{source_name}' removed successfully")
 
