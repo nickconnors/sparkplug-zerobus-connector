@@ -87,7 +87,7 @@ logs/
 
 **Content**:
 - System start/stop events
-- Protocol connections (OPC-UA, MQTT, Modbus)
+- Protocol connections (OPC-UA, MQTT, Modbus, Sparkplug B: incl. the primary host's ONLINE/OFFLINE)
 - Data flow statistics
 - Error and warning messages
 - Component status changes

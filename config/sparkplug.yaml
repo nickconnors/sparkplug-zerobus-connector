@@ -1,0 +1,78 @@
+# Sparkplug B → Databricks: one Sparkplug source (unified_connector/sparkplug/README.md) writing one row per
+# Sparkplug message to a sparkplug_raw table through Zerobus, with confirmed writes. Everything comes from
+# the environment, so the same file serves every deployment (the Docker image runs it by default).
+#
+#   .venv312/bin/python -m unified_connector --config config/sparkplug.yaml
+#
+# MQTT: SPARKPLUG_MQTT_ENDPOINT (default mqtt://localhost:1883), SPARKPLUG_MQTT_USERNAME,
+# SPARKPLUG_MQTT_PASSWORD, SPARKPLUG_MQTT_CLIENT_ID (default databricks-sparkplug).
+# Databricks: ZEROBUS_ENDPOINT, DATABRICKS_HOST, DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET (a service
+# principal with MODIFY + SELECT on the table), SPARKPLUG_CATALOG, SPARKPLUG_SCHEMA, SPARKPLUG_TABLE
+# (default bridge_stage_db.stage_db.sparkplug_raw).
+# Primary host: SPARKPLUG_PRIMARY_HOST_ID (the edges' Primary Host ID; empty = not a primary host),
+# SPARKPLUG_STATE_FORMAT (v3).
+# A procedure on NBIRTH: SPARKPLUG_EDGE_NODE_SCHEMAS=true, DATABRICKS_WAREHOUSE_ID,
+# SPARKPLUG_NBIRTH_PROCEDURE (default bridge_node_db.stage_db.create_edge_node_schema).
+# Write-ahead log (rows on disk until Zerobus acknowledged them): SPARKPLUG_WAL=true, SPARKPLUG_WAL_PATH
+# (default wal). Web UI: CONNECTOR_WEB_HOST (default 127.0.0.1), port 8090.
+connector:
+  name: Unified OT Zerobus Connector (Sparkplug B)
+  log_level: INFO
+bridge:
+  autostart: true
+web_ui:
+  enabled: true
+  host: '${env:CONNECTOR_WEB_HOST:127.0.0.1}'
+  port: 8090
+  auto_open_browser: false
+  authentication:
+    enabled: false
+discovery:
+  enabled: false
+normalization:
+  enabled: false
+backpressure:
+  memory_queue:
+    max_size: 100000
+    drop_policy: oldest
+  disk_spool:
+    enabled: false
+    encryption: false
+sources:
+  - name: chariot-sparkplug
+    protocol: sparkplug
+    enabled: true
+    endpoint: '${env:SPARKPLUG_MQTT_ENDPOINT:mqtt://localhost:1883}'
+    # target_table: catalog.schema.table   # its own table; here the default_target below
+    client_id: '${env:SPARKPLUG_MQTT_CLIENT_ID:databricks-sparkplug}'
+    username: '${env:SPARKPLUG_MQTT_USERNAME:}'
+    password: '${env:SPARKPLUG_MQTT_PASSWORD}'
+    primary_host_id: '${env:SPARKPLUG_PRIMARY_HOST_ID:}'
+    state_format: '${env:SPARKPLUG_STATE_FORMAT:v3}'
+    offline_after_seconds: 30
+    online_after_seconds: 30
+    edge_node_schemas:
+      enabled: '${env:SPARKPLUG_EDGE_NODE_SCHEMAS:false}'
+      warehouse_id: '${env:DATABRICKS_WAREHOUSE_ID:}'
+      procedures: ['${env:SPARKPLUG_NBIRTH_PROCEDURE:bridge_node_db.stage_db.create_edge_node_schema}']
+      schema_prefix: nb
+zerobus:
+  enabled: true
+  confirmed_writes: true                     # a Sparkplug table has them anyway; true: every table
+  drain_timeout_seconds: 15
+  wal:
+    enabled: '${env:SPARKPLUG_WAL:false}'
+    path: '${env:SPARKPLUG_WAL_PATH:wal}'
+    fsync_interval_seconds: 0.2
+  zerobus_endpoint: '${env:ZEROBUS_ENDPOINT}'
+  auth:
+    client_id: '${env:DATABRICKS_CLIENT_ID}'
+    client_secret: '${env:DATABRICKS_CLIENT_SECRET}'
+  default_target:
+    workspace_host: '${env:DATABRICKS_HOST}'
+    catalog: '${env:SPARKPLUG_CATALOG:bridge_stage_db}'
+    schema: '${env:SPARKPLUG_SCHEMA:stage_db}'
+    table: '${env:SPARKPLUG_TABLE:sparkplug_raw}'
+  batch:
+    max_records: 500
+    linger_seconds: 0.2

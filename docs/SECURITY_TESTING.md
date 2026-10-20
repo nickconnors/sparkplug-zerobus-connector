@@ -45,7 +45,7 @@ pytest tests/security/test_security_headers.py -v
 
 **Validations Implemented**:
 - **Source Names**: Alphanumeric, hyphens, underscores, periods only
-- **Protocols**: Whitelist (opcua, mqtt, modbus)
+- **Protocols**: Whitelist (opcua, mqtt, modbus, sparkplug)
 - **Endpoints**: URL format validation, dangerous character blocking
 - **Hostnames/IPs**: Format validation, length limits
 - **Ports**: Range validation (1-65535)

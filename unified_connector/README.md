@@ -1,13 +1,14 @@
 # Unified OT Zerobus Connector Client
 
-Enterprise-grade connector for streaming OT/IoT data from industrial protocols (OPC-UA, MQTT, Modbus) to Databricks Delta tables using ZeroBus.
+Enterprise-grade connector for streaming OT/IoT data from industrial protocols (OPC-UA, MQTT, Modbus, Sparkplug B) to Databricks Delta tables using ZeroBus.
 
 ## Features
 
 ### Protocol Support
 - **OPC-UA**: Auto-discovery, polling/subscription modes, tag normalization, OPC UA 10101 security
-- **MQTT**: Sparkplug B support, QoS levels, TLS/SSL, topic filtering
+- **MQTT**: QoS levels, TLS/SSL, topic filtering (Sparkplug B topics are recognised; use the `sparkplug` source to decode them)
 - **Modbus TCP/RTU**: Register mapping, data type conversion, multiple slave support
+- **Sparkplug B**: one row per message with the payload decoded to Eclipse Tahu's JSON, Sparkplug primary host STATE (edge store and forward during outages), `create_edge_node_schema` on NBIRTH; see [sparkplug/README.md](sparkplug/README.md)
 
 ### Data Processing
 - **Tag Normalization**: ISA-95/Purdue Model hierarchical path building
@@ -16,19 +17,21 @@ Enterprise-grade connector for streaming OT/IoT data from industrial protocols (
 - **Metadata Enrichment**: Site/area/line/equipment context
 
 ### ZeroBus Integration
-- **Per-Source Targets**: Route different sources to different Delta tables
+- **Per-Source Targets**: Route different sources to different Delta tables (each target table has its own queue)
+- **Confirmed Writes** (always for a table with Sparkplug rows; `zerobus.confirmed_writes` for all): a batch leaves the connector only once ZeroBus acknowledged it; resent on a fresh stream otherwise
 - **Batch Optimization**: Configurable batch size and timeout
 - **Auto-Reconnection**: Exponential backoff with jitter
 - **Credential Encryption**: Fernet AES-256-CBC for OAuth2 secrets
 
 ### Resilience
-- **Backpressure Management**: Memory queue + disk spooling + DLQ
+- **Backpressure Management**: Memory queue + disk spooling + DLQ, per target table
+- **Write-Ahead Log** (`zerobus.wal`, optional): rows on disk until ZeroBus acknowledged them, replayed after a crash
 - **Auto-Reconnection**: Protocol clients automatically reconnect on failure
 - **Health Monitoring**: Prometheus metrics, health check endpoints
 - **Circuit Breaker**: Protects ZeroBus from overload
 
 ### Management
-- **Web UI**: Configuration, monitoring, discovery management
+- **Web UI**: Configuration, monitoring, discovery management (sources of every protocol, Sparkplug B included, with their state)
 - **REST API**: Programmatic control
 - **Protocol Discovery**: Automatic network scanning for OPC-UA/MQTT/Modbus servers
 
@@ -47,7 +50,7 @@ The connector automatically detects and tracks vendor-specific data formats in r
 
 **Supported Vendor Formats:**
 - **Kepware**: Channel.Device.Tag structure (e.g., `Siemens_S7_Crushing.Crusher_01.MotorPower`)
-- **Sparkplug B**: MQTT topics with NBIRTH/DBIRTH/NDATA/DDATA, bdSeq fields
+- **Sparkplug B**: MQTT topics with NBIRTH/DBIRTH/NDATA/DDATA, bdSeq fields (records of the OPC-UA/MQTT sources; a `sparkplug` source's rows are counted as `sparkplug_b` too)
 - **Honeywell Experion**: Composite points (.PV/.SP/.OP/.MODE), FIM/AIM/PID modules
 - **Generic**: Simple path-based structures
 - **Unknown**: Unrecognized formats
@@ -221,6 +224,10 @@ GET /api/records?limit=100
     └──────────┘      └──────────┘      └──────────┘
 ```
 
+A **Sparkplug B** source bypasses vendor detection and tag normalization: each message becomes one
+`sparkplug_raw` row (payload as Tahu JSON) in its target's queue, written by a confirmed writer
+(`zerobus.confirmed_writes`), optionally through the write-ahead log ([sparkplug/README.md](sparkplug/README.md)).
+
 ## Quick Start
 
 ### 1. Prerequisites
@@ -384,9 +391,35 @@ sources:
         data_type: "float"
 ```
 
+#### Sparkplug B
+```yaml
+sources:
+  - name: "chariot-sparkplug"
+    protocol: "sparkplug"
+    endpoint: "mqtt://chariot:1883"
+    enabled: true
+    target_table: "bridge_stage_db.stage_db.sparkplug_raw"   # its own table (not shared with other sources)
+    client_id: "databricks-sparkplug"      # fixed and unique
+    username: "sparkplug_user"             # ACL: subscribe spBv1.0/#, publish its own STATE topic
+    password: "..."
+    primary_host_id: "databricks-zerobus"  # = the edges' Primary Host ID (omit: not a primary host)
+    edge_node_schemas:                     # optional: a stored procedure called on NBIRTH
+      enabled: true
+      warehouse_id: "<sql warehouse id>"
+      procedures: ["bridge_node_db.stage_db.create_edge_node_schema"]
+
+zerobus:
+  enabled: true                            # a Sparkplug table always has confirmed writes (primary host, NBIRTH call)
+```
+
+Its target table has the `sparkplug_raw` columns (DDL, grants, every setting:
+[sparkplug/README.md](sparkplug/README.md)); `config/sparkplug.yaml` is a complete, environment-driven example.
+
 ### Per-Source ZeroBus Targets
 
-Route different sources to different Delta tables:
+Route different sources to different Delta tables: a source's own `target_table` (`catalog.schema.table`, also
+in the web page's source form) wins, then `source_targets` by source name, then `default_target`. Sparkplug
+sources need a table of their own (the `sparkplug_raw` columns): one shared with other sources is refused.
 
 ```yaml
 zerobus:
@@ -415,7 +448,63 @@ zerobus:
       catalog: "manufacturing"
       schema: "plant1"
       table: "modbus_data"
+
+sources:
+  - name: "line2_opcua"
+    protocol: "opcua"
+    endpoint: "opc.tcp://line2:4840"
+    target_table: "manufacturing.plant1.line2_data"   # instead of a source_targets entry
 ```
+
+### Write Paths
+
+Each target table is written one of two ways:
+
+- **Original** (the default for OPC-UA, MQTT and Modbus tables): records go to the Zerobus SDK without waiting
+  for its acknowledgement. The fastest, but Zerobus's answer is never checked: rows it refuses (e.g. a column
+  the table doesn't have), or that were sent when the stream failed, are lost while the connector counts them
+  as sent.
+- **Confirmed writes** (always for a table with Sparkplug rows; `zerobus.confirmed_writes: true` for every
+  table): a batch is kept until Zerobus has acknowledged it, and resent on a fresh stream otherwise; with
+  `zerobus.wal` the rows not yet acknowledged also survive a crash. One batch per table is in flight at a time.
+  A table that refuses rows stops until it is fixed: the batch is resent and the rows behind it wait in the
+  queue (once it is full, its drop policy applies). Each table's status (rows written, failing since, batch in
+  flight) is in `/api/metrics` under `zerobus_targets`.
+
+Turn confirmed writes on wherever every row matters.
+
+### Target Table
+
+OPC-UA, MQTT and Modbus rows have the same columns whatever the protocol (JSON records). Zerobus refuses a row
+with a column the table doesn't have; without confirmed writes the connector doesn't wait for Zerobus's answer,
+so such rows are lost.
+
+```sql
+CREATE TABLE main.iot_data.sensor_readings (
+    event_time BIGINT,       -- microseconds since the epoch
+    ingest_time BIGINT,      -- microseconds since the epoch
+    source_name STRING,
+    endpoint STRING,
+    namespace INT,           -- OPC-UA namespace index (0 for MQTT and Modbus)
+    node_id STRING,          -- OPC-UA node id, e.g. ns=2;i=1001
+    browse_path STRING,      -- OPC-UA browse path, MQTT topic or Modbus register
+    status_code BIGINT,
+    status STRING,
+    value_type STRING,
+    value STRING,
+    value_num DOUBLE,        -- null when the value isn't a number
+    raw BINARY,
+    plc_name STRING,
+    plc_vendor STRING,
+    plc_model STRING,
+    vendor_format STRING     -- opcua, modbus, kepware, honeywell, generic, ...
+);
+```
+
+The OPC-UA table in [docs/designs/UNITY_CATALOG_SCHEMAS.md](../docs/designs/UNITY_CATALOG_SCHEMAS.md) (the
+simulator's) has these columns except `vendor_format`: add it for the connector
+(`ALTER TABLE ... ADD COLUMN vendor_format STRING`). The service principal needs `USE CATALOG` and `USE SCHEMA`,
+and `MODIFY` and `SELECT` on the table.
 
 ### Tag Normalization
 
@@ -543,9 +632,17 @@ Response:
   },
   "backpressure": {...},
   "zerobus_targets": {...},
+  "wal": {...},
   "clients": {...}
 }
 ```
+
+**Sparkplug B sources:**
+```bash
+GET /api/sparkplug/health
+```
+Per Sparkplug source: `state` (ONLINE/OFFLINE), MQTT connection, rows written, skips, queue, ZeroBus
+writer, NBIRTH calls and write-ahead log counters ([sparkplug/README.md](sparkplug/README.md#health)).
 
 ## Testing with OT Simulator
 

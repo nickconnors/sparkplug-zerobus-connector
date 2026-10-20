@@ -7,3 +7,10 @@ venv
 __pycache__
 *.pyc
 .git
+.venv312
+.venv312c
+.hypothesis
+tests
+logs
+spool
+webui/node_modules

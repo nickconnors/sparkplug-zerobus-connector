@@ -1,7 +1,7 @@
 # Unified OT/IoT → Databricks ZeroBus Connector
 
 This repo contains:
-- **`unified_connector/`**: a multi-protocol edge connector (OPC-UA, MQTT, Modbus) with a lightweight Web UI, and streaming to Databricks via **ZeroBus**.
+- **`unified_connector/`**: a multi-protocol edge connector (**OPC-UA, MQTT, Modbus, Sparkplug B**) with a lightweight Web UI, and streaming to Databricks via **ZeroBus**.
 - **`ot_simulator/`**: an OT data simulator you can use to generate sample OPC-UA/MQTT/Modbus data.
 
 ## Python version (required)
@@ -24,6 +24,8 @@ pip install -r requirements.txt
 ```bash
 .venv312c/bin/python -m pytest -q tests
 ```
+
+The Sparkplug B tests (`tests/sparkplug/`) have extra test-only dependencies (`pip install -r tests/sparkplug/requirements.txt`). Some of them need **Java 17** (Eclipse Tahu's Java implementation is the reference for the JSON, through JPype; `TAHU_JVM`, `TAHU_JAVA_CLASSPATH`) or **Docker** with the `eclipse-mosquitto:2` image; they are skipped when those aren't available.
 
 ## NIS2 Directive Compliance
 
@@ -190,9 +192,10 @@ See `docs/NIS2_IMPLEMENTATION_SUMMARY.md` for complete implementation details an
 ## What it does (current behavior)
 
 - **Discovery**: scans configured subnets and lists reachable **OPC-UA servers**, **MQTT brokers**, and **Modbus TCP servers**.
-- **Sources**: you configure sources (protocol + endpoint) and start/stop them individually.
+- **Sources**: you configure sources (protocol + endpoint) and start/stop them individually: **OPC-UA**, **MQTT**, **Modbus** and **Sparkplug B** (below), any mix in one connector.
 - **Bridge**: starts “infrastructure” (ZeroBus client + batching) without auto-starting all sources.
-- **ZeroBus streaming**: batches records and writes to your Unity Catalog table via ZeroBus ingest.
+- **ZeroBus streaming**: batches records and writes to your Unity Catalog tables via ZeroBus ingest; each target table has its own queue, so every source's rows reach only its own table.
+- **Confirmed writes** (always for a table with Sparkplug rows; `zerobus.confirmed_writes` for every table): a batch leaves the connector only once ZeroBus has acknowledged it, and is resent on a fresh stream until it is; an optional **write-ahead log** (`zerobus.wal`) keeps unacknowledged rows across a crash.
 - **Diagnostics-first UI**: discovery “Test” shows detailed output in-panel.
 
 ---
@@ -213,6 +216,7 @@ The connector is typically deployed in **Level 3.5 (DMZ)** so OT stays isolated 
 │                                              │
 │   Unified Connector (this repo)              │
 │   - OPC-UA client / MQTT client / Modbus     │
+│   - Sparkplug B primary host application     │
 │   - buffering + batching                     │
 │   - ZeroBus ingest client                    │
 └──────────────────────────▲───────────────────┘
@@ -221,9 +225,27 @@ The connector is typically deployed in **Level 3.5 (DMZ)** so OT stays isolated 
 │ Level 2/1/0: OT Network                       │
 │                                              │
 │   PLCs / OPC-UA Servers / MQTT Brokers /     │
-│   Modbus Devices                              │
+│   Modbus Devices / Sparkplug edges (e.g.     │
+│   Ignition + MQTT Transmission → Chariot)    │
 └──────────────────────────────────────────────┘
 ```
+
+---
+
+## Sparkplug B
+
+A **`sparkplug`** source makes the connector a Sparkplug B host application on an MQTT server (for example Chariot, fed by Ignition with MQTT Transmission). It writes **one row per Sparkplug message** to a Delta table (`sparkplug_raw`), the payload as Eclipse Tahu's JSON. Births, deaths and data are stored; host STATE, commands, foreign or malformed topics and undecodable payloads are skipped and counted.
+
+- **Primary host** (`primary_host_id`): the connector publishes Sparkplug STATE (its only MQTT publish: its own `spBv1.0/STATE/<id>` topic; it never sends commands). While ZeroBus writes fail it goes OFFLINE, so the edges buffer (store and forward) and send their history once it is ONLINE again.
+- **NBIRTH call** (`edge_node_schemas`): on each edge node birth it calls a stored procedure you name, by default `create_edge_node_schema`, to build per-model views.
+- **Health**: `GET /api/sparkplug/health`; both web pages add, edit and show Sparkplug sources.
+
+```bash
+docker build -f Dockerfile.sparkplug -t unified-ot-connector-sparkplug --build-arg PIP_INDEX_URL=<index> .
+docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8090:8090 unified-ot-connector-sparkplug
+```
+
+The image runs `config/sparkplug.yaml`, configured entirely by environment variables (its header lists them). Table DDL, grants, configuration, edge settings and behaviour: [unified_connector/sparkplug/README.md](unified_connector/sparkplug/README.md).
 
 ---
 
@@ -232,7 +254,7 @@ The connector is typically deployed in **Level 3.5 (DMZ)** so OT stays isolated 
 ### Start the connector
 
 ```bash
-cd "/Users/pravin.varma/Documents/Demo/unified-ot-zerobus-connector"
+cd unified-ot-zerobus-connector
 .venv312/bin/python -m unified_connector --log-level INFO
 ```
 
@@ -261,7 +283,7 @@ This repo includes a Colima-friendly compose file:
 ### Start
 
 ```bash
-cd "/Users/pravin.varma/Documents/Demo/unified-ot-zerobus-connector"
+cd unified-ot-zerobus-connector
 colima start
 docker compose -f docker-compose.unified-connector.colima.yml up -d --build
 ```
@@ -271,7 +293,7 @@ Web UI: `http://127.0.0.1:8080`
 ### Stop
 
 ```bash
-cd "/Users/pravin.varma/Documents/Demo/unified-ot-zerobus-connector"
+cd unified-ot-zerobus-connector
 docker compose -f docker-compose.unified-connector.colima.yml down
 ```
 
@@ -297,16 +319,24 @@ Web UI (HTML/JS)
         └─ /api/metrics      -> bridge/backpressure/zerobus counters
 
 Protocol clients (OPC-UA / MQTT / Modbus)
-  └─> UnifiedBridge queue (backpressure)
-        └─> ZeroBus client batches -> Unity Catalog table
+  └─> vendor detection + tag normalization
+        └─> UnifiedBridge: one queue per target table (backpressure)
+              └─> ZeroBus client batches -> Unity Catalog table
+
+Sparkplug B source (unified_connector/protocols/sparkplug_client.py, unified_connector/sparkplug/)
+  └─> one sparkplug_raw row per message (payload as Tahu JSON), primary host STATE
+        └─> its target's queue (+ optional write-ahead log)
+              └─> confirmed writer (acknowledged batches) -> sparkplug_raw table
+                    └─> on NBIRTH: create_edge_node_schema (SQL warehouse)
 ```
 
 ---
 
 ## Configuration
 
-- Main config: `unified_connector/config/config.yaml`
+- Main config: `unified_connector/config/config.yaml` (or any file passed with `--config`)
 - Normalization config: `unified_connector/config/normalization_config.yaml`
+- Sparkplug B: `config/sparkplug.yaml` (everything from environment variables; see [unified_connector/sparkplug/README.md](unified_connector/sparkplug/README.md))
 
 **Security note**: do not commit ZeroBus secrets. Configure credentials via the UI, env vars, or local credential store.
 
@@ -1037,6 +1067,10 @@ zerobus:
 - **docs/CODE_QUALITY_AUDIT.md** - Code quality audit report (435 lines)
 - **docs/CODE_QUALITY_FIXES_SUMMARY.md** - Code quality fixes implementation (515 lines)
 
+### Sources
+- **unified_connector/README.md** - Protocol sources (OPC-UA, MQTT, Modbus), per-source targets, REST API
+- **unified_connector/sparkplug/README.md** - Sparkplug B: the raw table, primary host, NBIRTH call, write-ahead log, health, Docker
+
 ### Feature Documentation
 - **docs/ENCRYPTION_OVERVIEW.md** - Encryption implementation details
 - **docs/INCIDENT_RESPONSE.md** - Incident response system guide
@@ -1045,6 +1079,7 @@ zerobus:
 - **docs/SECURITY_TESTING.md** - Security testing framework
 
 ### Configuration Examples
+- **config/sparkplug.yaml** - A Sparkplug B source writing to Databricks (environment-driven; the Docker image's default)
 - **config/incident_playbooks.yml** - Incident response playbooks (900 lines)
 - **config/siem/alert_rules.yml** - SIEM alert rules
 
@@ -1135,6 +1170,8 @@ See `docs/NIS2_QUICK_REFERENCE.md` for complete operational procedures.
 ## License
 
 See LICENSE file for details.
+
+The Sparkplug B decoder in `unified_connector/sparkplug/` (`sparkplug_b.proto`, the generated `*_pb2.py`, `tahu_json.py`) is derived from [Eclipse Tahu](https://github.com/eclipse-tahu/tahu) and stays under the Eclipse Public License 2.0: see [unified_connector/sparkplug/NOTICE.md](unified_connector/sparkplug/NOTICE.md).
 
 ---
 

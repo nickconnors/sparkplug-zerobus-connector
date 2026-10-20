@@ -32,7 +32,7 @@ Complete guide for deploying the Unified OT Zerobus Connector Client in local, D
 ### Network Requirements
 
 - Access to OPC-UA servers (port 4840)
-- Access to MQTT brokers (ports 1883, 8883)
+- Access to MQTT brokers (ports 1883, 8883), including the MQTT server of Sparkplug B edges (e.g. Chariot)
 - Access to Modbus servers (ports 502, 5020)
 - Outbound HTTPS to Databricks workspace
 

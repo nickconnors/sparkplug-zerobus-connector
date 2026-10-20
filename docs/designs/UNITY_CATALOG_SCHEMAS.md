@@ -184,6 +184,10 @@ USING DELTA
 COMMENT 'Bronze layer for OPC-UA sensor data - protobuf format';
 ```
 
+The connector (`unified_connector`, whose example config writes to this table) sends JSON records with these
+columns plus `vendor_format STRING`, for every protocol: a table it writes to needs that column too
+(`unified_connector/README.md`, Target Table).
+
 **Field Details:**
 
 | Field | Type | Protobuf Type | Description |
