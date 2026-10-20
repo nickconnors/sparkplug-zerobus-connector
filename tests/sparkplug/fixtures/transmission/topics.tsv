@@ -1,0 +1,13 @@
+# file	MQTT topic (synthetic payloads shaped like MQTT Transmission's, written by make_fixtures.py)
+ndeath-1.bin	spBv1.0/Plant1/NDEATH/Line A
+nbirth-1.bin	spBv1.0/Plant1/NBIRTH/Line A
+dbirth-1.bin	spBv1.0/Plant1/DBIRTH/Line A/M100
+ddata-3.bin	spBv1.0/Plant1/DDATA/Line A/M100
+ddata-1.bin	spBv1.0/Plant1/DDATA/Line A/M100
+ddata-2.bin	spBv1.0/Plant1/DDATA/Line A/M100
+ddata-4.bin	spBv1.0/Plant1/DDATA/Line A/M100
+ddata-5.bin	spBv1.0/Plant1/DDATA/Line A/M100
+dbirth-gzip.bin	spBv1.0/Plant1/DBIRTH/Line A/M100	(compression GZIP)
+dbirth-deflate.bin	spBv1.0/Plant1/DBIRTH/Line A/M100	(compression DEFLATE)
+ddata-gzip.bin	spBv1.0/Plant1/DDATA/Line A/M100	(compression GZIP)
+ddata-deflate.bin	spBv1.0/Plant1/DDATA/Line A/M100	(compression DEFLATE)

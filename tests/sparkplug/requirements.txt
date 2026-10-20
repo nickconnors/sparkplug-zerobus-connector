@@ -1,0 +1,5 @@
+# Test-only dependencies of tests/sparkplug (not needed at runtime)
+# JPype1: Java Eclipse Tahu as the reference (needs a Java 17 runtime; see java_tahu.py)
+JPype1>=1.5
+hypothesis>=6.100
+setuptools<81    # amqtt 0.11 (the in-process MQTT broker of test_sparkplug_source.py) imports pkg_resources

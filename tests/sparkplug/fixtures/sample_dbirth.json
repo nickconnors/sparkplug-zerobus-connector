@@ -1,0 +1,1221 @@
+{
+  "metrics": [
+    {
+      "dataType": "Template",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Motor 1",
+      "timestamp": 1767268805012,
+      "value": {
+        "isDefinition": false,
+        "metrics": [
+          {
+            "dataType": "Float",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Speed",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 1500.0
+          },
+          {
+            "dataType": "Float",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Current",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 29.15
+          },
+          {
+            "dataType": "Double",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Winding Temp",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              },
+              "executionRate": {
+                "type": "Int64",
+                "value": 5000
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 72.14677772611739
+          },
+          {
+            "dataType": "Boolean",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Energized",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": true
+          },
+          {
+            "dataType": "Int32",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Starts",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 4270
+          },
+          {
+            "dataType": "Int64",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Run Hours",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              },
+              "executionRate": {
+                "type": "Int64",
+                "value": 10000
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 49766
+          },
+          {
+            "dataType": "Int16",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Fault Code",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": -1
+          },
+          {
+            "dataType": "Int8",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Direction",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 1
+          },
+          {
+            "dataType": "String",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Mode",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 2
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": "Auto"
+          },
+          {
+            "dataType": "DateTime",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Last Start",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 1767197818700
+          },
+          {
+            "dataType": "String",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Serial Number",
+            "timestamp": 1767268803968,
+            "value": "SN-45158"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Location",
+            "type": "String",
+            "value": "Plant1/Line A/M200/Motor 1"
+          },
+          {
+            "name": "Rated kW",
+            "type": "Float",
+            "value": 15.0
+          },
+          {
+            "name": "Poles",
+            "type": "Int32",
+            "value": 4
+          }
+        ],
+        "reference": "Motor",
+        "version": ""
+      }
+    },
+    {
+      "dataType": "Template",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Feed Pump",
+      "timestamp": 1767268805012,
+      "value": {
+        "isDefinition": false,
+        "metrics": [
+          {
+            "dataType": "Double",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Flow",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 110.1207797496947
+          },
+          {
+            "dataType": "Float",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Discharge Pressure",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 8.1
+          },
+          {
+            "dataType": "Boolean",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Valve Open",
+            "properties": {
+              "Quality": {
+                "type": "Int32",
+                "value": 1073742080
+              },
+              "executionMode": {
+                "type": "Int32",
+                "value": 2
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": null
+          },
+          {
+            "dataType": "DataSet",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Events",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              },
+              "executionRate": {
+                "type": "Int64",
+                "value": 5000
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": {
+              "columnNames": [
+                "Time",
+                "Code",
+                "Text",
+                "Duration",
+                "Acknowledged",
+                "Occurrences"
+              ],
+              "numberOfColumns": 6,
+              "rows": [
+                [
+                  1767268622031,
+                  205,
+                  "Dry run",
+                  83.9,
+                  true,
+                  420510584748
+                ],
+                [
+                  1767268683031,
+                  205,
+                  "Low suction",
+                  15.222,
+                  false,
+                  258460121472
+                ],
+                [
+                  1767268744031,
+                  101,
+                  "Overload",
+                  16.316,
+                  true,
+                  146774446111
+                ]
+              ],
+              "types": [
+                "DateTime",
+                "Int32",
+                "String",
+                "Double",
+                "Boolean",
+                "Int64"
+              ]
+            }
+          },
+          {
+            "dataType": "Template",
+            "name": "Drive",
+            "timestamp": 1767268803968,
+            "value": {
+              "isDefinition": false,
+              "metrics": [
+                {
+                  "dataType": "Float",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Speed",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 1451.0
+                },
+                {
+                  "dataType": "Float",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Current",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 20.79
+                },
+                {
+                  "dataType": "Double",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Winding Temp",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    },
+                    "executionRate": {
+                      "type": "Int64",
+                      "value": 5000
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 60.54949601724139
+                },
+                {
+                  "dataType": "Boolean",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Energized",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": true
+                },
+                {
+                  "dataType": "Int32",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Starts",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 4686
+                },
+                {
+                  "dataType": "Int64",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Run Hours",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    },
+                    "executionRate": {
+                      "type": "Int64",
+                      "value": 10000
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 24834
+                },
+                {
+                  "dataType": "Int16",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Fault Code",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": -1
+                },
+                {
+                  "dataType": "Int8",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Direction",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 1
+                },
+                {
+                  "dataType": "String",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Mode",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 2
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": "Auto"
+                },
+                {
+                  "dataType": "DateTime",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Last Start",
+                  "properties": {
+                    "executionMode": {
+                      "type": "Int32",
+                      "value": 1
+                    }
+                  },
+                  "timestamp": 1767268803968,
+                  "value": 1767209548814
+                },
+                {
+                  "dataType": "String",
+                  "isHistorical": false,
+                  "isTransient": false,
+                  "metaData": {
+                    "contentType": "",
+                    "description": "",
+                    "fileName": "",
+                    "fileType": "",
+                    "md5": "",
+                    "multiPart": false,
+                    "seq": 0,
+                    "size": 0
+                  },
+                  "name": "Serial Number",
+                  "timestamp": 1767268803968,
+                  "value": "SN-78860"
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "Location",
+                  "type": "String",
+                  "value": "Plant1/Line A/M200/Feed Pump/Drive"
+                },
+                {
+                  "name": "Rated kW",
+                  "type": "Float",
+                  "value": 7.5
+                },
+                {
+                  "name": "Poles",
+                  "type": "Int32",
+                  "value": 4
+                }
+              ],
+              "reference": "Motor",
+              "version": ""
+            }
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Location",
+            "type": "String",
+            "value": "Plant1/Line A/M200/Feed Pump"
+          },
+          {
+            "name": "Max Flow",
+            "type": "Double",
+            "value": 150.0
+          }
+        ],
+        "reference": "Pump",
+        "version": ""
+      }
+    },
+    {
+      "dataType": "Double",
+      "isHistorical": false,
+      "isTransient": false,
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Status/Ambient Temp",
+      "timestamp": 1767268803968,
+      "value": 29.340514078338742
+    },
+    {
+      "dataType": "FloatArray",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Status/Zone Temps",
+      "timestamp": 1767268803968,
+      "value": [
+        86.3,
+        24.0,
+        25.9,
+        78.5
+      ]
+    },
+    {
+      "dataType": "BooleanArray",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Status/Interlocks",
+      "timestamp": 1767268803968,
+      "value": [
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "dataType": "Int32Array",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Status/Cycle Counts",
+      "timestamp": 1767268803968,
+      "value": [
+        646208,
+        527608,
+        445055,
+        74940,
+        332152,
+        -1
+      ]
+    },
+    {
+      "dataType": "StringArray",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Status/Recipe Steps",
+      "timestamp": 1767268803968,
+      "value": [
+        "Fill",
+        "Heat",
+        "Hold",
+        "Drain"
+      ]
+    },
+    {
+      "dataType": "Boolean",
+      "name": "Device Control/Rebirth",
+      "timestamp": 1767268805031,
+      "value": false
+    },
+    {
+      "dataType": "Template",
+      "metaData": {
+        "contentType": "",
+        "description": "",
+        "fileName": "",
+        "fileType": "",
+        "md5": "",
+        "multiPart": false,
+        "seq": 0,
+        "size": 0
+      },
+      "name": "Motor 2",
+      "timestamp": 1767268805012,
+      "value": {
+        "isDefinition": false,
+        "metrics": [
+          {
+            "dataType": "Float",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Speed",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 1490.7
+          },
+          {
+            "dataType": "Float",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Current",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 32.89
+          },
+          {
+            "dataType": "Double",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Winding Temp",
+            "properties": {
+              "Quality": {
+                "type": "Int32",
+                "value": -2147483129
+              },
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              },
+              "executionRate": {
+                "type": "Int64",
+                "value": 5000
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": null
+          },
+          {
+            "dataType": "Boolean",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Energized",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": true
+          },
+          {
+            "dataType": "Int32",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Starts",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 2998
+          },
+          {
+            "dataType": "Int64",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Run Hours",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              },
+              "executionRate": {
+                "type": "Int64",
+                "value": 10000
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 48433
+          },
+          {
+            "dataType": "Int16",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Fault Code",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": -1
+          },
+          {
+            "dataType": "Int8",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Direction",
+            "properties": {
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": 1
+          },
+          {
+            "dataType": "String",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Mode",
+            "properties": {
+              "Quality": {
+                "type": "Int32",
+                "value": -1073741566
+              },
+              "executionMode": {
+                "type": "Int32",
+                "value": 2
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": null
+          },
+          {
+            "dataType": "DateTime",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Last Start",
+            "properties": {
+              "Quality": {
+                "type": "Int32",
+                "value": -2147483126
+              },
+              "executionMode": {
+                "type": "Int32",
+                "value": 1
+              }
+            },
+            "timestamp": 1767268803968,
+            "value": null
+          },
+          {
+            "dataType": "String",
+            "isHistorical": false,
+            "isTransient": false,
+            "metaData": {
+              "contentType": "",
+              "description": "",
+              "fileName": "",
+              "fileType": "",
+              "md5": "",
+              "multiPart": false,
+              "seq": 0,
+              "size": 0
+            },
+            "name": "Serial Number",
+            "timestamp": 1767268803968,
+            "value": "SN-62410"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Location",
+            "type": "String",
+            "value": "Plant1/Line A/M200/Motor 2"
+          },
+          {
+            "name": "Rated kW",
+            "type": "Float",
+            "value": 22.0
+          },
+          {
+            "name": "Poles",
+            "type": "Int32",
+            "value": 2
+          }
+        ],
+        "reference": "Motor",
+        "version": ""
+      }
+    }
+  ],
+  "seq": 1,
+  "timestamp": 1767268805031
+}
