@@ -867,7 +867,9 @@ function renderPipelineStage(stage) {
 }
 
 async function refreshSources() {
-  const [data, status] = await Promise.all([apiFetch("/api/sources"), apiFetch("/api/status")]);
+  const [data, status, sparkplug] = await Promise.all([
+    apiFetch("/api/sources"), apiFetch("/api/status"), apiFetch("/api/sparkplug/health").catch(() => ({})),
+  ]);
   const sources = Array.isArray(data?.sources) ? data.sources : [];
   const clients = status?.metrics?.clients || {};
   const activeMap = new Set(Object.keys(clients));
@@ -893,7 +895,9 @@ async function refreshSources() {
       <td><code>${escapeHtml(name)}</code></td>
       <td>${escapeHtml(protocol)}</td>
       <td><code>${escapeHtml(endpoint)}</code></td>
-      <td>${activeMap.has(name) ? "<strong>yes</strong>" : "<span class='muted'>no</span>"}</td>
+      <td>${activeMap.has(name) ? "<strong>yes</strong>" : "<span class='muted'>no</span>"}${
+        activeMap.has(name) && sparkplug?.[name]?.state ? ` <span class="muted">· ${escapeHtml(sparkplug[name].state)}</span>` : ""
+      }</td>
       <td>${typeof enabled === "boolean" ? (enabled ? "true" : "false") : "<span class='muted'>n/a</span>"}</td>
       <td>
         <span class="actions">
@@ -1064,6 +1068,12 @@ async function stopZerobus() {
   await refreshStatus();
 }
 
+// A Sparkplug source's NBIRTH procedures (catalog.schema.procedure): a list, or text separated by commas
+function nbirthProcedures(ens) {
+  const v = ens.procedures;
+  return (typeof v === "string" ? v.split(",") : Array.isArray(v) ? v : []).map((x) => String(x).trim()).filter(Boolean);
+}
+
 function fillSourceForm(source) {
   $("#srcName").value = source?.name ?? "";
   $("#srcProtocol").value = source?.protocol ?? "opcua";
@@ -1074,6 +1084,20 @@ function fillSourceForm(source) {
   $("#srcArea").value = source?.area ?? "";
   $("#srcLine").value = source?.line ?? "";
   $("#srcEquipment").value = source?.equipment ?? "";
+
+  // Sparkplug B
+  const ens = source?.edge_node_schemas || {};
+  $("#srcSpClientId").value = source?.client_id ?? "";
+  $("#srcSpPrimaryHostId").value = source?.primary_host_id ?? "";
+  $("#srcSpStateFormat").value = source?.state_format || "v3";
+  $("#srcSpOfflineAfter").value = source?.offline_after_seconds ?? "";
+  $("#srcSpOnlineAfter").value = source?.online_after_seconds ?? "";
+  $("#srcSpEnsEnabled").checked = !["false", "0", "no", "off", ""].includes(String(ens.enabled ?? (source?.edge_node_schemas ? true : false)).trim().toLowerCase());
+  $("#srcSpEnsWarehouse").value = ens.warehouse_id ?? "";
+  $("#srcSpEnsProcedures").value = nbirthProcedures(ens).join(", ");
+  $("#srcSpEnsPrefix").value = ens.schema_prefix ?? "";
+  $("#srcSparkplugFields").dataset.hadEns = source?.edge_node_schemas ? "1" : "";
+  toggleSparkplugFields();
 
   $("#srcMode").value = "edit";
   $("#srcOriginalName").value = source?.name ?? "";
@@ -1089,6 +1113,12 @@ function resetSourceForm() {
   $("#srcArea").value = "";
   $("#srcLine").value = "";
   $("#srcEquipment").value = "";
+  for (const id of ["#srcSpClientId", "#srcSpPrimaryHostId", "#srcSpOfflineAfter", "#srcSpOnlineAfter",
+                    "#srcSpEnsWarehouse", "#srcSpEnsProcedures", "#srcSpEnsPrefix"]) $(id).value = "";
+  $("#srcSpStateFormat").value = "v3";
+  $("#srcSpEnsEnabled").checked = false;
+  $("#srcSparkplugFields").dataset.hadEns = "";
+  toggleSparkplugFields();
   $("#srcMode").value = "create";
   $("#srcOriginalName").value = "";
   $("#srcSubmit").textContent = "Add source";
@@ -1104,6 +1134,8 @@ async function submitSourceForm(e) {
     enabled: $("#srcEnabled").checked,
   };
 
+  const mode = $("#srcMode").value;
+  // An edit sends every field the form shows (empty = cleared); fields it doesn't show are kept
   for (const [id, key] of [
     ["#srcSite", "site"],
     ["#srcArea", "area"],
@@ -1111,10 +1143,29 @@ async function submitSourceForm(e) {
     ["#srcEquipment", "equipment"],
   ]) {
     const v = $(id).value.trim();
-    if (v) payload[key] = v;
+    if (v || mode === "edit") payload[key] = v;
   }
 
-  const mode = $("#srcMode").value;
+  if (payload.protocol === "sparkplug") {
+    const num = (id) => ($(id).value.trim() === "" ? "" : Number($(id).value));
+    const fields = {
+      client_id: $("#srcSpClientId").value.trim(),
+      primary_host_id: $("#srcSpPrimaryHostId").value.trim(),
+      state_format: $("#srcSpStateFormat").value,
+      offline_after_seconds: num("#srcSpOfflineAfter"),
+      online_after_seconds: num("#srcSpOnlineAfter"),
+    };
+    for (const [key, v] of Object.entries(fields)) if (v !== "" || mode === "edit") payload[key] = v;
+    if ($("#srcSpEnsEnabled").checked || (mode === "edit" && $("#srcSparkplugFields").dataset.hadEns)) {
+      payload.edge_node_schemas = {
+        enabled: $("#srcSpEnsEnabled").checked,
+        warehouse_id: $("#srcSpEnsWarehouse").value.trim(),
+        procedures: $("#srcSpEnsProcedures").value.split(",").map((x) => x.trim()).filter(Boolean),
+        schema_prefix: $("#srcSpEnsPrefix").value.trim(),
+      };
+    }
+  }
+
   if (mode === "edit") {
     const originalName = $("#srcOriginalName").value;
     await apiFetch(`/api/sources/${encodeURIComponent(originalName)}`, {
@@ -1133,6 +1184,10 @@ async function submitSourceForm(e) {
 }
 
 
+
+function toggleSparkplugFields() {
+  $("#srcSparkplugFields").style.display = $("#srcProtocol").value === "sparkplug" ? "" : "none";
+}
 
 function getSelectedSourceNames() {
   return Array.from(document.querySelectorAll('input[data-select="source"]:checked'))
@@ -1211,6 +1266,7 @@ function prefillCreateSourceFromDiscovery(protocol, endpoint, host, port) {
   $("#srcProtocol").value = protocol || "opcua";
   $("#srcEndpoint").value = endpoint || "";
   $("#srcEnabled").checked = true;
+  toggleSparkplugFields();
   toast(`Prefilled source from discovery: ${protocol} ${host}:${port}`, "ok");
   // Scroll into view
   document.getElementById('sourceForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1301,6 +1357,7 @@ function wireEvents() {
   });
 
   $("#sourceForm").addEventListener("submit", (e) => submitSourceForm(e).catch(onError));
+  $("#srcProtocol").addEventListener("change", toggleSparkplugFields);
   $("#srcReset").addEventListener("click", (e) => {
     e.preventDefault();
     resetSourceForm();

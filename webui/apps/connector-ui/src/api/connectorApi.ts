@@ -8,6 +8,7 @@ import type {
   PermissionsResponse,
   PipelineDiagnostics,
   SourceConfig,
+  SparkplugHealth,
   ZeroBusConfig,
 } from "./types";
 
@@ -57,6 +58,9 @@ export const connectorApi = {
   startZeroBus: () => apiJson<Record<string, unknown>>("/api/zerobus/start", { method: "POST", body: "{}" }),
   stopZeroBus: () => apiJson<Record<string, unknown>>("/api/zerobus/stop", { method: "POST", body: "{}" }),
   zeroBusDiagnostics: (deep: boolean) => apiJson<Record<string, unknown>>(`/api/zerobus/diagnostics?deep=${deep ? "true" : "false"}`),
+
+  // sparkplug
+  getSparkplugHealth: () => apiJson<SparkplugHealth>("/api/sparkplug/health"),
 
   // pipeline
   getPipelineDiagnostics: () => apiJson<PipelineDiagnostics>("/api/diagnostics/pipeline"),

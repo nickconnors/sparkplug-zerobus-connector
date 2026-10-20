@@ -150,6 +150,15 @@ class ConfigLoader:
         else:
             return config
 
+    def load_raw(self) -> Dict[str, Any]:
+        """The YAML as it is on disk: ``${env:...}``/``${credential:...}`` placeholders and encrypted fields
+        left as they are, for changing and saving back without writing secrets."""
+        with open(self.config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        if not config:
+            raise ValueError(f"Empty configuration file: {self.config_path}")
+        return config
+
     def save(self, config: Dict[str, Any], save_path: Optional[Path] = None) -> bool:
         """Save configuration to YAML file.
 
@@ -167,8 +176,17 @@ class ConfigLoader:
             # Create parent directory if it doesn't exist
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # The file's leading comment block (e.g. the environment variables it reads) is kept
+            header = []
+            if save_path.exists():
+                for line in save_path.read_text().splitlines(keepends=True):
+                    if not line.startswith('#'):
+                        break
+                    header.append(line)
+
             # Save YAML
             with open(save_path, 'w') as f:
+                f.writelines(header)
                 yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
             logger.info(f"Saved configuration to {save_path}")

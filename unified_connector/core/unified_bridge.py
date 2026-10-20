@@ -1352,37 +1352,43 @@ class UnifiedBridge:
         Raises:
             ValueError: If source doesn't exist
         """
-        if source_name not in self.clients:
+        if source_name not in self.clients and not any(s.get('name') == source_name for s in self.sources):
             raise ValueError(f"Source '{source_name}' not found")
 
         logger.info(f"Removing source: {source_name}")
 
-        # Stop the client
-        client = self.clients[source_name]
-        try:
-            await client.stop()
-            await client.disconnect()
-        except Exception as e:
-            logger.error(f"Error stopping source '{source_name}': {e}")
-
-        # Cancel the task
-        if source_name in self.client_tasks:
-            task = self.client_tasks[source_name]
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            del self.client_tasks[source_name]
-
-        # Remove from clients dict
-        del self.clients[source_name]
+        # Stop it if it runs (a stopped source is removed from the configuration only)
+        if source_name in self.clients:
+            await self.stop_source(source_name)
         self._source_queues.pop(source_name, None)
 
-        # Remove from sources list
-        self.sources = [s for s in self.sources if s.get('name') != source_name]
+        # Remove from sources list (in place: the web server lists the same list)
+        self.sources[:] = [s for s in self.sources if s.get('name') != source_name]
 
         logger.info(f"✓ Source '{source_name}' removed successfully")
+
+    async def update_source(self, source_name: str, source_config: Dict[str, Any]) -> None:
+        """Replace a source's configuration; a running source is restarted with it."""
+        index = next((i for i, s in enumerate(self.sources) if s.get('name') == source_name), None)
+        if index is None:
+            raise ValueError(f"Source '{source_name}' not found")
+        was_active = source_name in self.clients
+        if was_active:
+            await self.stop_source(source_name)
+        self._source_queues.pop(source_name, None)
+        old = self.sources[index]
+        self.sources[index] = source_config
+        if was_active and source_config.get('enabled', True):
+            try:
+                await self._start_client(source_config)
+            except Exception:
+                # runs on as before (the page shows the error, nothing is saved)
+                self.sources[index] = old
+                self._source_queues.pop(source_name, None)
+                if old.get('enabled', True):
+                    await self._start_client(old)
+                raise
+        logger.info(f"✓ Source '{source_name}' updated" + (" and restarted" if was_active else ""))
 
     async def start_zerobus(self) -> Dict[str, Any]:
         """Start ZeroBus streaming dynamically.

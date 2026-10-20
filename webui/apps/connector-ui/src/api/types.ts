@@ -44,3 +44,6 @@ export type ZeroBusConfig = {
 
 export type PipelineDiagnostics = Record<string, unknown>;
 
+// GET /api/sparkplug/health: per Sparkplug source, its state (ONLINE/OFFLINE) and counters
+export type SparkplugHealth = Record<string, { state?: string; [k: string]: unknown }>;
+

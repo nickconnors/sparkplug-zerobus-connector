@@ -37,20 +37,60 @@ from unified_connector.core.tls_manager import create_ssl_context_from_config
 logger = logging.getLogger(__name__)
 
 
+SECRET_KEY_PARTS = ('password', 'secret', 'token', 'private_key', 'api_key')
+
+
+def _masked(value: Any) -> Any:
+    """Sources for the API: values of password/secret/token keys replaced (the forms never send them back)."""
+    if isinstance(value, dict):
+        return {k: ('********' if v and any(p in str(k).lower() for p in SECRET_KEY_PARTS) else _masked(v))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_masked(v) for v in value]
+    return value
+
+
+def _same(a: Any, b: Any) -> bool:
+    """A form value equal to the running one (the file may spell a number or switch as text)."""
+    return a == b or (not isinstance(a, (dict, list)) and str(a).strip().lower() == str(b).strip().lower())
+
+
+def _edited(entry: Dict[str, Any], current: Dict[str, Any], form: Dict[str, Any]) -> Dict[str, Any]:
+    """A source's ``entry`` (the running config, or the file's, with its placeholders) after a form edit:
+    fields the form doesn't send are kept; a sent field equal to the running value (``current``) keeps
+    the entry's spelling; a changed one is set, an empty one removed; nested settings the same way."""
+    out = dict(entry)
+    for key, value in form.items():
+        now = current.get(key)
+        if isinstance(value, dict):
+            out[key] = _edited(entry.get(key) if isinstance(entry.get(key), dict) else {},
+                               now if isinstance(now, dict) else {}, value)
+        elif key in entry and _same(value, now):
+            continue
+        elif value in ('', None):
+            out.pop(key, None)
+        else:
+            out[key] = value
+    return out
+
+
 class WebServer:
     """Web server for configuration and monitoring."""
 
-    def __init__(self, config: Dict[str, Any], bridge, discovery):
+    def __init__(self, config: Dict[str, Any], bridge, discovery, config_path: Optional[Path] = None):
         """Initialize web server.
 
         Args:
             config: Application configuration
             bridge: UnifiedBridge instance
             discovery: DiscoveryService instance
+            config_path: the file the connector was started with (source changes are saved there;
+                None: the package's default config.yaml)
         """
         self.config = config
         self.bridge = bridge
         self.discovery = discovery
+        self.config_path = Path(config_path) if config_path else None
 
         web_ui_config = config.get('web_ui', {})
         self.host = web_ui_config.get('host', '0.0.0.0')
@@ -258,9 +298,19 @@ class WebServer:
 
     @require_permission(Permission.READ)
     async def get_sources(self, request: web.Request) -> web.Response:
-        """Get configured data sources."""
-        sources = self.config.get('sources', [])
-        return web.json_response({'sources': sources})
+        """Get configured data sources (passwords and secrets masked)."""
+        sources = self.bridge.sources if self.bridge is not None else self.config.get('sources', [])
+        return web.json_response({'sources': _masked(sources)})
+
+    def _save_sources(self, change) -> None:
+        """Applies ``change`` (sources -> sources) to the sources in the file the connector was started
+        with, as written there: ``${env:...}``/``${credential:...}`` placeholders stay placeholders."""
+        from unified_connector.core.config_loader import ConfigLoader
+        config_loader = ConfigLoader(config_path=self.config_path)
+        config = config_loader.load_raw()
+        config['sources'] = change(list(config.get('sources') or []))
+        if not config_loader.save(config):
+            raise RuntimeError(f"saving the configuration to {config_loader.config_path} failed")
 
     @require_permission(Permission.WRITE)
     async def add_source(self, request: web.Request) -> web.Response:
@@ -295,11 +345,7 @@ class WebServer:
             )
 
             # Update config file
-            from unified_connector.core.config_loader import ConfigLoader
-            config_loader = ConfigLoader()
-            config = config_loader.load()
-            config['sources'].append(data)
-            config_loader.save(config)
+            self._save_sources(lambda sources: sources + [data])
 
             return web.json_response({'status': 'ok', 'message': f"Source '{data['name']}' added"})
 
@@ -317,11 +363,7 @@ class WebServer:
             await self.bridge.remove_source(source_name)
 
             # Update config file
-            from unified_connector.core.config_loader import ConfigLoader
-            config_loader = ConfigLoader()
-            config = config_loader.load()
-            config['sources'] = [s for s in config['sources'] if s.get('name') != source_name]
-            config_loader.save(config)
+            self._save_sources(lambda sources: [s for s in sources if s.get('name') != source_name])
 
             return web.json_response({'status': 'ok', 'message': f"Source '{source_name}' removed"})
 
@@ -355,23 +397,15 @@ class WebServer:
                     status=400
                 )
 
-            # Remove and re-add source
-            await self.bridge.remove_source(source_name)
-            await self.bridge.add_source(
-                source_name=data['name'],
-                source_type=data['protocol'],
-                source_config=data
-            )
+            # The form shows only some fields: the others (credentials, topics, TLS, ...) are kept
+            current = next((s for s in self.bridge.sources if s.get('name') == source_name), None)
+            if current is None:
+                return web.json_response({'status': 'error', 'message': f"Source not found: {source_name}"}, status=404)
+            await self.bridge.update_source(source_name, _edited(current, current, data))
 
-            # Update config file
-            from unified_connector.core.config_loader import ConfigLoader
-            config_loader = ConfigLoader()
-            config = config_loader.load()
-            config['sources'] = [
-                data if s.get('name') == source_name else s
-                for s in config['sources']
-            ]
-            config_loader.save(config)
+            # Update config file (unchanged fields keep the file's spelling, e.g. a ${env:...} placeholder)
+            self._save_sources(lambda sources: [
+                _edited(s, current, data) if s.get('name') == source_name else s for s in sources])
 
             return web.json_response({'status': 'ok', 'message': f"Source '{source_name}' updated"})
 
@@ -635,10 +669,11 @@ class WebServer:
                         "Set CONNECTOR_MASTER_PASSWORD (recommended) or provide CONNECTOR_ZEROBUS_CLIENT_SECRET env var."
                     )
 
-            # Update config file (IMPORTANT: load raw to avoid persisting injected secrets)
+            # Update config file (IMPORTANT: load raw to avoid persisting injected secrets): the file the
+            # connector was started with, as written there (${env:...} placeholders stay placeholders)
             from unified_connector.core.config_loader import ConfigLoader
-            config_loader = ConfigLoader(credential_manager=cred_manager)
-            config_raw = config_loader.load(inject_credentials=False)
+            config_loader = ConfigLoader(config_path=self.config_path, credential_manager=cred_manager)
+            config_raw = config_loader.load_raw()
 
             existing = config_raw.get('zerobus', {}) or {}
             merged = {**existing, **data}
@@ -1019,11 +1054,46 @@ class WebServer:
                     <option value="opcua">OPC-UA</option>
                     <option value="mqtt">MQTT</option>
                     <option value="modbus">Modbus</option>
+                    <option value="sparkplug">MQTT (Sparkplug)</option>
                   </select>
                 </label>
               </div>
 
               <label>Endpoint <input id="srcEndpoint" placeholder="opc.tcp://192.168.1.100:4840" required /></label>
+
+              <div id="srcSparkplugFields" style="display:none">
+                <div class="split">
+                  <label>Client ID <input id="srcSpClientId" placeholder="databricks-sparkplug" /></label>
+                  <label>Primary host ID <input id="srcSpPrimaryHostId" placeholder="empty: not a primary host" /></label>
+                </div>
+                <div class="split">
+                  <label>
+                    STATE format
+                    <select id="srcSpStateFormat">
+                      <option value="v3">v3 (spBv1.0/STATE)</option>
+                      <option value="v2">v2 (STATE, legacy)</option>
+                    </select>
+                  </label>
+                  <label>Offline after (s) <input id="srcSpOfflineAfter" type="number" min="1" placeholder="30" /></label>
+                </div>
+                <div class="split">
+                  <label>Online after (s) <input id="srcSpOnlineAfter" type="number" min="1" placeholder="30" /></label>
+                  <label>
+                    <span>Procedure on NBIRTH</span>
+                    <div class="row" style="gap:8px">
+                      <input id="srcSpEnsEnabled" type="checkbox" style="width:18px;height:18px" />
+                      <span class="muted">Call it after each edge node birth</span>
+                    </div>
+                  </label>
+                </div>
+                <div class="split">
+                  <label>SQL warehouse ID <input id="srcSpEnsWarehouse" placeholder="warehouse id" /></label>
+                  <label>Schema prefix <input id="srcSpEnsPrefix" placeholder="nb" /></label>
+                </div>
+                <label>NBIRTH procedure <input id="srcSpEnsProcedures" placeholder="bridge_node_db.stage_db.create_edge_node_schema (comma-separated)" /></label>
+                <div class="muted">catalog.schema.procedure, called as procedure(prefix, group_id, edge_node_id, false) like create_edge_node_schema.</div>
+                <div class="muted">Username and password: in the configuration file only.</div>
+              </div>
 
               <div class="split">
                 <label>Site <input id="srcSite" placeholder="plant1" /></label>

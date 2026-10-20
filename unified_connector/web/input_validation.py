@@ -16,6 +16,8 @@ import logging
 from typing import Any, Dict, Optional, List
 from pathlib import Path
 
+from unified_connector.sparkplug.edge_node_schemas import nbirth_procedures
+
 logger = logging.getLogger(__name__)
 
 
@@ -300,6 +302,33 @@ def validate_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for field in optional_fields:
         if field in config:
             validated[field] = validate_config_value(config[field])
+
+    # Sparkplug B NBIRTH procedures: their names go into SQL text
+    ens = validated.get('edge_node_schemas')
+    if isinstance(ens, dict):
+        try:
+            procedures = nbirth_procedures(ens)
+        except ValueError as e:
+            raise ValidationError(str(e))
+        if ens.get('enabled') is True and not procedures:
+            raise ValidationError("NBIRTH procedure: at least one catalog.schema.procedure when the call is on")
+        if ens.get('enabled') is True and not str(ens.get('warehouse_id') or '').strip():
+            raise ValidationError("SQL warehouse ID: needed when the NBIRTH call is on")
+
+    # Sparkplug B primary host: refused here, not only when the source starts with it
+    state_format = str(validated.get('state_format') or '').strip().lower()
+    if state_format and state_format not in ('v3', 'v2'):
+        raise ValidationError(f"STATE format: v3 or v2, not {validated['state_format']!r}")
+    for field in ('offline_after_seconds', 'online_after_seconds'):
+        value = validated.get(field)
+        if value is None or value == '':
+            continue
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            seconds = -1.0
+        if not seconds >= 0:
+            raise ValidationError(f"{field}: a number of seconds, 0 or more (not {value!r})")
 
     # Log validation success
     logger.info(

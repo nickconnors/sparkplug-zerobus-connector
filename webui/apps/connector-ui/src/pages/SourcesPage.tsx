@@ -1,9 +1,29 @@
 import { Button, Field, Panel, Select, TextInput } from "@ot/ui-kit";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { connectorApi } from "../api/connectorApi";
-import type { ConnectorStatus, SourceConfig } from "../api/types";
+import type { ConnectorStatus, SourceConfig, SparkplugHealth } from "../api/types";
 import { useAuthState } from "../auth/AuthContext";
 import { useAppToast } from "../toast/ToastContext";
+
+// Sparkplug B source settings (unified_connector/sparkplug/README.md); username and password stay in the config file
+const EMPTY_SPARKPLUG = {
+  client_id: "",
+  primary_host_id: "",
+  state_format: "v3",
+  offline_after_seconds: "",
+  online_after_seconds: "",
+  nbirth_enabled: false,
+  warehouse_id: "",
+  procedures: "",
+  schema_prefix: "",
+  had_nbirth: false, // the source had edge_node_schemas: an edit sends them even when switched off
+};
+
+const text = (v: unknown) => (v === undefined || v === null ? "" : String(v));
+const switchedOn = (v: unknown) => !["false", "0", "no", "off", ""].includes(text(v).trim().toLowerCase());
+// NBIRTH procedures (catalog.schema.procedure): a list, or text separated by commas
+const listed = (v: unknown) =>
+  (typeof v === "string" ? v.split(",") : Array.isArray(v) ? v : []).map((x) => text(x).trim()).filter(Boolean);
 
 export function SourcesPage() {
   const toast = useAppToast();
@@ -11,6 +31,8 @@ export function SourcesPage() {
 
   const [sources, setSources] = useState<SourceConfig[]>([]);
   const [status, setStatus] = useState<ConnectorStatus | null>(null);
+  const [sparkplugHealth, setSparkplugHealth] = useState<SparkplugHealth>({});
+  const [sparkplug, setSparkplug] = useState(EMPTY_SPARKPLUG);
   const [loading, setLoading] = useState(false);
 
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -37,10 +59,15 @@ export function SourcesPage() {
     if (!can.read) return;
     setLoading(true);
     try {
-      const [srcData, st] = await Promise.all([connectorApi.getSources(), connectorApi.getStatus()]);
+      const [srcData, st, sp] = await Promise.all([
+        connectorApi.getSources(),
+        connectorApi.getStatus(),
+        connectorApi.getSparkplugHealth().catch(() => ({})),
+      ]);
       const list = Array.isArray((srcData as any)?.sources) ? (srcData as any).sources : Array.isArray(srcData) ? srcData : [];
       setSources(list);
       setStatus(st);
+      setSparkplugHealth(sp);
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Failed to load sources", "bad");
     } finally {
@@ -143,17 +170,31 @@ export function SourcesPage() {
       line: String((s as any)?.line ?? ""),
       equipment: String((s as any)?.equipment ?? ""),
     });
+    const nbirth = (s.edge_node_schemas ?? {}) as Record<string, unknown>;
+    setSparkplug({
+      client_id: text(s.client_id),
+      primary_host_id: text(s.primary_host_id),
+      state_format: text(s.state_format) || "v3",
+      offline_after_seconds: text(s.offline_after_seconds),
+      online_after_seconds: text(s.online_after_seconds),
+      nbirth_enabled: s.edge_node_schemas ? switchedOn(nbirth.enabled ?? true) : false,
+      warehouse_id: text(nbirth.warehouse_id),
+      procedures: listed(nbirth.procedures).join(", "),
+      schema_prefix: text(nbirth.schema_prefix),
+      had_nbirth: Boolean(s.edge_node_schemas),
+    });
   }, []);
 
   const resetForm = useCallback(() => {
     setMode("create");
     setOriginalName("");
     setForm({ name: "", protocol: "opcua", endpoint: "", enabled: true, site: "", area: "", line: "", equipment: "" });
+    setSparkplug(EMPTY_SPARKPLUG);
   }, []);
 
   const submit = useCallback(async () => {
     if (!can.write) return toast.show("Requires write permission", "warn");
-    const payload: any = {
+    const payload: SourceConfig = {
       name: form.name.trim(),
       protocol: form.protocol,
       endpoint: form.endpoint.trim(),
@@ -163,6 +204,26 @@ export function SourcesPage() {
       line: form.line.trim(),
       equipment: form.equipment.trim(),
     };
+    if (form.protocol === "sparkplug") {
+      // an edit sends every field shown (empty = cleared); the server keeps the fields the form doesn't show
+      const seconds = (v: string) => (v.trim() === "" ? "" : Number(v));
+      const fields: Record<string, unknown> = {
+        client_id: sparkplug.client_id.trim(),
+        primary_host_id: sparkplug.primary_host_id.trim(),
+        state_format: sparkplug.state_format,
+        offline_after_seconds: seconds(sparkplug.offline_after_seconds),
+        online_after_seconds: seconds(sparkplug.online_after_seconds),
+      };
+      for (const [key, v] of Object.entries(fields)) if (v !== "" || mode === "edit") payload[key] = v;
+      if (sparkplug.nbirth_enabled || (mode === "edit" && sparkplug.had_nbirth)) {
+        payload.edge_node_schemas = {
+          enabled: sparkplug.nbirth_enabled,
+          warehouse_id: sparkplug.warehouse_id.trim(),
+          procedures: listed(sparkplug.procedures),
+          schema_prefix: sparkplug.schema_prefix.trim(),
+        };
+      }
+    }
     try {
       if (mode === "create") {
         const res = await connectorApi.addSource(payload);
@@ -176,11 +237,12 @@ export function SourcesPage() {
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Save failed", "bad");
     }
-  }, [can.write, form, mode, originalName, refresh, resetForm, toast]);
+  }, [can.write, form, mode, originalName, refresh, resetForm, sparkplug, toast]);
 
   const deleteSource = useCallback(
     async (name: string) => {
       if (!can.delete) return toast.show("Requires delete permission", "warn");
+      if (!window.confirm(`Delete source "${name}"?`)) return;
       try {
         const res = await connectorApi.deleteSource(name);
         toast.show(String((res as any)?.message ?? "Source deleted"), "warn");
@@ -262,6 +324,7 @@ export function SourcesPage() {
                   <option value="opcua">OPC-UA</option>
                   <option value="mqtt">MQTT</option>
                   <option value="modbus">Modbus</option>
+                  <option value="sparkplug">MQTT (Sparkplug)</option>
                 </Select>
               </Field>
             </div>
@@ -273,6 +336,95 @@ export function SourcesPage() {
                 placeholder="opc.tcp://192.168.1.100:4840"
               />
             </Field>
+
+            {form.protocol === "sparkplug" && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <Field label="Client ID">
+                    <TextInput
+                      value={sparkplug.client_id}
+                      onChange={(e) => setSparkplug((p) => ({ ...p, client_id: e.target.value }))}
+                      placeholder="databricks-sparkplug"
+                    />
+                  </Field>
+                  <Field label="Primary host ID">
+                    <TextInput
+                      value={sparkplug.primary_host_id}
+                      onChange={(e) => setSparkplug((p) => ({ ...p, primary_host_id: e.target.value }))}
+                      placeholder="empty: not a primary host"
+                    />
+                  </Field>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <Field label="STATE format">
+                    <Select value={sparkplug.state_format} onChange={(e) => setSparkplug((p) => ({ ...p, state_format: e.target.value }))}>
+                      <option value="v3">v3 (spBv1.0/STATE)</option>
+                      <option value="v2">v2 (STATE, legacy)</option>
+                    </Select>
+                  </Field>
+                  <Field label="Offline after (s)">
+                    <TextInput
+                      type="number"
+                      min={1}
+                      value={sparkplug.offline_after_seconds}
+                      onChange={(e) => setSparkplug((p) => ({ ...p, offline_after_seconds: e.target.value }))}
+                      placeholder="30"
+                    />
+                  </Field>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <Field label="Online after (s)">
+                    <TextInput
+                      type="number"
+                      min={1}
+                      value={sparkplug.online_after_seconds}
+                      onChange={(e) => setSparkplug((p) => ({ ...p, online_after_seconds: e.target.value }))}
+                      placeholder="30"
+                    />
+                  </Field>
+                  <label className="field">
+                    <div className="field-label">Procedure on NBIRTH</div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={sparkplug.nbirth_enabled}
+                        onChange={(e) => setSparkplug((p) => ({ ...p, nbirth_enabled: e.target.checked }))}
+                        style={{ width: 18, height: 18 }}
+                      />
+                      <span className="muted">Call it after each edge node birth</span>
+                    </div>
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <Field label="SQL warehouse ID">
+                    <TextInput
+                      value={sparkplug.warehouse_id}
+                      onChange={(e) => setSparkplug((p) => ({ ...p, warehouse_id: e.target.value }))}
+                      placeholder="warehouse id"
+                    />
+                  </Field>
+                  <Field label="Schema prefix">
+                    <TextInput
+                      value={sparkplug.schema_prefix}
+                      onChange={(e) => setSparkplug((p) => ({ ...p, schema_prefix: e.target.value }))}
+                      placeholder="nb"
+                    />
+                  </Field>
+                </div>
+                <Field label="NBIRTH procedure">
+                  <TextInput
+                    value={sparkplug.procedures}
+                    onChange={(e) => setSparkplug((p) => ({ ...p, procedures: e.target.value }))}
+                    placeholder="bridge_node_db.stage_db.create_edge_node_schema (comma-separated)"
+                  />
+                </Field>
+                <div className="muted">
+                  catalog.schema.procedure, called as procedure(prefix, group_id, edge_node_id, false) like
+                  create_edge_node_schema.
+                </div>
+                <div className="muted">Username and password: in the configuration file only.</div>
+              </>
+            )}
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <Field label="Site">
@@ -367,6 +519,7 @@ export function SourcesPage() {
                     const endpoint = String((s as any)?.endpoint ?? "");
                     const enabled = (s as any)?.enabled;
                     const active = activeMap.has(name);
+                    const sparkplugState = sparkplugHealth[name]?.state;
                     return (
                       <tr key={name} style={{ borderTop: "1px solid rgba(255,255,255,0.03)" }}>
                         <td style={{ padding: 8 }}>
@@ -383,7 +536,10 @@ export function SourcesPage() {
                         <td style={{ padding: 8 }}>
                           <code>{endpoint}</code>
                         </td>
-                        <td style={{ padding: 8 }}>{active ? <strong>yes</strong> : <span className="muted">no</span>}</td>
+                        <td style={{ padding: 8 }}>
+                          {active ? <strong>yes</strong> : <span className="muted">no</span>}
+                          {active && sparkplugState ? <span className="muted"> · {sparkplugState}</span> : null}
+                        </td>
                         <td style={{ padding: 8 }}>
                           {typeof enabled === "boolean" ? (enabled ? "true" : "false") : <span className="muted">n/a</span>}
                         </td>

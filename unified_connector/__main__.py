@@ -54,7 +54,8 @@ class UnifiedConnector:
         self.web_server = WebServer(
             config=self.config,
             bridge=self.bridge,
-            discovery=self.discovery
+            discovery=self.discovery,
+            config_path=self.config_loader.config_path,   # the page saves sources back to this file
         )
 
         # Shutdown event
