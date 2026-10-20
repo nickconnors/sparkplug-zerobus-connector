@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional
 from enum import Enum
 import aiofiles
 from cryptography.fernet import Fernet
@@ -57,6 +57,8 @@ class BackpressureManager:
 
         # Initialize queue
         self.memory_queue = asyncio.Queue(maxsize=self.max_queue_size)
+        # Called with each record the drop policy throws away (the bridge's write-ahead log marks it done)
+        self.on_drop: Optional[Callable[[Dict[str, Any]], None]] = None
 
         # Dead Letter Queue
         self.dlq_dir = self.spool_dir / "dlq"
@@ -101,7 +103,9 @@ class BackpressureManager:
 
     def _init_encryption(self) -> None:
         """Initialize encryption for disk spool."""
-        key_file = self.spool_dir.parent / "certs" / "spool_encryption.key"
+        # disk_spool.encryption_key_file: one key for several spool directories (the bridge's per-target queues)
+        key_file = Path(self.config.get('disk_spool', {}).get('encryption_key_file')
+                        or self.spool_dir.parent / "certs" / "spool_encryption.key")
 
         if key_file.exists():
             with open(key_file, 'rb') as f:
@@ -196,7 +200,7 @@ class BackpressureManager:
         self.spool_file_counter += 1
 
         # Serialize and encrypt record
-        record_json = json.dumps(record)
+        record_json = json.dumps(record, default=str)   # e.g. an OPC-UA DateTime value: as text
         if self.spool_encryption:
             record_data = self.cipher.encrypt(record_json.encode())
         else:
@@ -271,6 +275,7 @@ class BackpressureManager:
             # Reject incoming record
             logger.warning(f"Dropping newest record (queue full)")
             self.metrics['records_dropped'] += 1
+            self.dropped(record)
             return False
 
         elif self.drop_policy == DropPolicy.OLDEST:
@@ -279,6 +284,7 @@ class BackpressureManager:
                 dropped_record = self.memory_queue.get_nowait()
                 logger.warning(f"Dropping oldest record (queue full)")
                 self.metrics['records_dropped'] += 1
+                self.dropped(dropped_record)
 
                 # Try to enqueue new record
                 self.memory_queue.put_nowait(record)
@@ -288,6 +294,14 @@ class BackpressureManager:
                 return False
 
         return False
+
+    def dropped(self, record: Dict[str, Any]) -> None:
+        """Tells ``on_drop`` about a record that won't be delivered."""
+        if self.on_drop is not None:
+            try:
+                self.on_drop(record)
+            except Exception as e:
+                logger.warning(f"on_drop failed: {e}")
 
     async def send_to_dlq(self, record: Dict[str, Any], error: str):
         """

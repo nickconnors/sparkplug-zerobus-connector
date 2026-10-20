@@ -16,6 +16,7 @@ venv/
 # Local runtime state (do not commit)
 .unified_connector/
 spool/
+wal/
 certs/
 
 # Built React WebUI assets (built via webui/ workspace)

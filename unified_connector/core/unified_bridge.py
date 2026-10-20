@@ -13,7 +13,10 @@ Features:
 """
 
 import asyncio
+import collections
+import dataclasses
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,8 +26,19 @@ from unified_connector.protocols.factory import create_protocol_client
 from unified_connector.normalizer import get_normalization_manager
 from unified_connector.core.backpressure import BackpressureManager
 from unified_connector.core.zerobus_client import ZeroBusClient
+from unified_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
+from unified_connector.core.wal import SEQ_FIELD, WriteAheadLog
+from unified_connector.sparkplug import raw_row
 
 logger = logging.getLogger(__name__)
+
+# _record_kind of a queued Sparkplug row (written with the sparkplug_raw columns)
+SPARKPLUG_RAW = 'sparkplug_raw'
+
+
+def _enabled(value: Any) -> bool:
+    """A config switch that may come from the environment as a string."""
+    return str(value).strip().lower() not in ('false', '0', 'no', 'off', '', 'none')
 
 
 class UnifiedBridge:
@@ -71,11 +85,34 @@ class UnifiedBridge:
             self.norm_manager = None
             logger.info("Tag normalization disabled")
 
-        # Initialize backpressure manager
-        self.backpressure = BackpressureManager(config.get('backpressure', {}))
+        # Backpressure: one queue per Zerobus target table (each the configured size, its disk spool in a
+        # subdirectory per target), so each target's writer takes only its own sources' rows
+        self.backpressure_config = config.get('backpressure', {})
+        self.queues: Dict[str, BackpressureManager] = {}
+        self._source_queues: Dict[str, BackpressureManager] = {}
+        self.backpressure = self._queue(self._get_target_id(self.zerobus_config.get('default_target', {})))
 
         # ZeroBus clients (one per unique target)
         self.zerobus_clients: Dict[str, ZeroBusClient] = {}
+
+        # zerobus.confirmed_writes: rows leave the queue only once Zerobus acknowledged them (ConfirmedWriter,
+        # one per target, own streams); otherwise ZeroBusClient.send_batch as before
+        self.confirmed_writes = bool(self.zerobus_config.get('confirmed_writes', False))
+        self.drain_timeout_s = float(self.zerobus_config.get('drain_timeout_seconds', 15.0))
+        self.writers: Dict[str, ConfirmedWriter] = {}
+
+        # zerobus.wal: a write-ahead log per confirmed-writes target (rows on disk before they are queued,
+        # replayed after a crash; core/wal.py), off by default
+        self.wal_config = self.zerobus_config.get('wal') or {}
+        self.wal_enabled = _enabled(self.wal_config.get('enabled', False))
+        if self.wal_enabled and not self.confirmed_writes:
+            logger.warning("zerobus.wal needs zerobus.confirmed_writes (acknowledged rows); not logging rows")
+            self.wal_enabled = False
+        self.wals: Dict[str, WriteAheadLog] = {}
+        self.wal_tasks: Dict[str, asyncio.Task] = {}
+        self._queue_wals: Dict[BackpressureManager, WriteAheadLog] = {}
+        # rows the log replays, per target: the writer takes them before the queue (in order, none dropped)
+        self._wal_replay: Dict[str, collections.deque] = {}
 
         # Protocol clients
         self.clients: Dict[str, ProtocolClient] = {}
@@ -195,6 +232,7 @@ class UnifiedBridge:
 
     async def _initialize_zerobus_clients(self):
         """Initialize ZeroBus clients for each unique target."""
+        self._source_queues.clear()   # the targets may have changed
         # Get default target
         default_target = self.zerobus_config.get('default_target', {})
 
@@ -236,13 +274,115 @@ class UnifiedBridge:
                 }
 
                 client = ZeroBusClient(zb_config)
-                await client.connect()
+                if self.confirmed_writes:
+                    streams = ZerobusRowStreams(client.zerobus_endpoint, client.workspace_url, client.full_table_name,
+                                                client.client_id, client.client_secret)
+                    await self._open_wal(target_id)
+                    self.writers[target_id] = self._make_writer(target_id, streams.open)
+                else:
+                    await client.connect()
 
                 self.zerobus_clients[target_id] = client
                 logger.info(f"✓ ZeroBus client connected: {target_id}")
 
             except Exception as e:
                 logger.error(f"Failed to initialize ZeroBus client for {target_id}: {e}")
+
+    async def _open_wal(self, target_id: str) -> None:
+        """The target's write-ahead log (once per process: Zerobus may be stopped and started again), its rows
+        not acknowledged before the last stop queued again ahead of new ones."""
+        if not self.wal_enabled or target_id in self.wals:
+            return
+        cfg = self.wal_config
+        wal = WriteAheadLog(Path(cfg.get('path', 'wal')) / self._target_dir(target_id),
+                            fsync_interval_s=float(cfg.get('fsync_interval_seconds', 0.2)),
+                            segment_bytes=int(float(cfg.get('segment_mb', 16)) * (1 << 20)),
+                            max_bytes=int(float(cfg.get('max_size_mb', 1024)) * (1 << 20)), name=target_id)
+        pending = wal.open()
+        queue = self._queue(target_id)
+        self.wals[target_id] = wal
+        self._queue_wals[queue] = wal
+        queue.on_drop = lambda record: wal.done([record[SEQ_FIELD]] if SEQ_FIELD in record else [])
+        # Not through the bounded queue: nothing drains it yet, so rows beyond its size would be dropped (and
+        # count as done) or refused. The writer takes them first, before any newer row (a pipeline's watermark
+        # on inserted_at would drop them if newer rows were written before them).
+        self._wal_replay[target_id] = collections.deque(pending)
+        self.wal_tasks[target_id] = asyncio.create_task(wal.run())
+        logger.info(f"Write-ahead log for {target_id}: {wal.directory} ({len(pending)} rows to write first)")
+
+    def _make_writer(self, target_id: str, open_stream) -> ConfirmedWriter:
+        """A ConfirmedWriter for one target, taking batches from the backpressure queue."""
+        batch = self.zerobus_config.get('batch', {})
+        bp = self._queue(target_id)
+        wal = self.wals.get(target_id)
+        taken: List[int] = []   # log sequences taken since the last acknowledgement (one batch in flight at a time)
+
+        replay = self._wal_replay.setdefault(target_id, collections.deque())
+
+        def to_record(record: Dict[str, Any]) -> Dict[str, Any]:
+            if SEQ_FIELD in record:
+                taken.append(record[SEQ_FIELD])
+            return self._to_zerobus_message(record)
+
+        def bad_row(topic: Any, e: Exception) -> None:
+            writer.skip_row(topic, e)
+
+        async def take(n: int, linger: float, wait: float) -> List[Dict[str, Any]]:
+            if replay:
+                return convert_rows([replay.popleft() for _ in range(min(n, len(replay)))], to_record, bad_row)
+            kept: List[Dict[str, Any]] = []   # this take's rows: back in front if it is cancelled part-way
+
+            def keep(record: Dict[str, Any]) -> Dict[str, Any]:
+                out = to_record(record)
+                kept.append(record)
+                return out
+            try:
+                return await take_from_backpressure(bp, keep, n, linger, wait, bad_row)
+            except asyncio.CancelledError:
+                for record in reversed(kept):
+                    if SEQ_FIELD in record and record[SEQ_FIELD] in taken:
+                        taken.remove(record[SEQ_FIELD])   # not sent: not done with the next acknowledgement
+                    replay.appendleft(record)             # the next writer's first rows
+                raise
+
+        writer = ConfirmedWriter(
+            take_batch=take,
+            open_stream=open_stream,
+            batch_size=int(batch.get('max_records', 500)),
+            linger_s=float(batch.get('linger_seconds', 0.2)),
+            queue_depth=lambda: len(replay) + bp.memory_queue.qsize() + len(bp.spool_files),
+            queue_high_water=int(bp.max_queue_size * 0.8),
+            name=target_id,
+        )
+        if wal is not None:
+            def acknowledged(_batch: List[str]) -> None:
+                # also covers rows of an earlier take skipped as too large (taken, never sent)
+                wal.done(taken)
+                taken.clear()
+            writer.add_listener(acknowledged)
+        return writer
+
+    def _target_dir(self, target_id: str) -> str:
+        """A target id as a directory name (spool, write-ahead log)."""
+        return re.sub(r'[^A-Za-z0-9._-]', '_', target_id).lstrip('.') or 'default'
+
+    def _queue(self, target_id: str) -> BackpressureManager:
+        """The backpressure queue of one target (created on first use)."""
+        queue = self.queues.get(target_id)
+        if queue is None:
+            spool = dict(self.backpressure_config.get('disk_spool', {}))
+            base = Path(spool.get('path', 'spool'))
+            spool['path'] = str(base / self._target_dir(target_id))
+            spool.setdefault('encryption_key_file', str(base.parent / 'certs' / 'spool_encryption.key'))
+            queue = self.queues[target_id] = BackpressureManager({**self.backpressure_config, 'disk_spool': spool})
+        return queue
+
+    def _queue_for_source(self, source_name: Optional[str]) -> BackpressureManager:
+        """The queue of the target a source writes to (the default target's for an unknown source)."""
+        queue = self._source_queues.get(source_name)
+        if queue is None:
+            queue = self._source_queues[source_name] = self._queue(self._get_target_for_source(source_name or ''))
+        return queue
 
     def _get_target_id(self, target_config: Dict[str, Any]) -> str:
         """Generate unique ID for ZeroBus target.
@@ -303,7 +443,7 @@ class UnifiedBridge:
             source_name=source_name,
             endpoint=source_config['endpoint'],
             config=source_config,
-            on_record=self._on_record,
+            on_record=lambda record: self._on_record(record, source_name),
             on_stats=self._on_stats
         )
 
@@ -484,12 +624,20 @@ class UnifiedBridge:
 
         return "unknown"
 
-    def _on_record(self, record: ProtocolRecord):
+    def _on_record(self, record: ProtocolRecord, source_name: Optional[str] = None):
         """Callback when protocol client receives a record.
 
         Args:
-            record: Protocol record
+            record: Protocol record, or a Sparkplug ``raw_row.RawRow``
+            source_name: the source it came from (picks the target's queue; else the record's own)
         """
+        if source_name is None:
+            source_name = record.get('source_name') if isinstance(record, dict) else getattr(record, 'source_name', None)
+        queue = self._queue_for_source(source_name)
+        if isinstance(record, raw_row.RawRow):
+            self._on_raw_row(record, queue)
+            return
+
         self.metrics['records_received'] += 1
 
         # Detect vendor format first
@@ -607,15 +755,36 @@ class UnifiedBridge:
         self.vendor_pipelines[protocol_vendor_key]['after_normalization'].append(after_norm)
 
         # Enqueue for ZeroBus
-        # Fast-path: avoid creating a task per record (can starve the event loop).
+        self._enqueue_fast(record_dict, queue)
+
+    def _on_raw_row(self, row: "raw_row.RawRow", queue: BackpressureManager) -> None:
+        """A Sparkplug row goes to Zerobus unchanged: no vendor detection, no normalization."""
+        self.metrics['records_received'] += 1
+        self.metrics['vendor_formats']['sparkplug_b'] += 1
+        breakdown = self.metrics['protocol_vendor_breakdown'].setdefault('sparkplug', {})
+        breakdown['sparkplug_b'] = breakdown.get('sparkplug_b', 0) + 1
+        pipeline = self.vendor_pipelines['sparkplug_sparkplug_b']
+        pipeline['record_count'] += 1
+        pipeline['raw_protocol'].append({'timestamp': time.time(), 'protocol': 'sparkplug', 'topic_or_path': row.msg_topic,
+                                         'message_type': row.message_type, 'vendor_format': 'sparkplug_b'})
+        self._enqueue_fast({'_record_kind': SPARKPLUG_RAW, 'vendor_format': 'sparkplug_b', 'protocol': 'sparkplug',
+                            **row.to_zerobus_record()}, queue)
+
+    def _enqueue_fast(self, record_dict: Dict[str, Any], queue: BackpressureManager) -> None:
+        """Enqueue for ZeroBus without a task per record (one per record can starve the event loop)."""
+        wal = self._queue_wals.get(queue)
+        if wal is not None:
+            seq = wal.append(record_dict)   # on disk before it is queued
+            if seq is not None:
+                record_dict[SEQ_FIELD] = seq
         try:
-            self.backpressure.memory_queue.put_nowait(record_dict)
-            self.backpressure.metrics['records_enqueued'] += 1
-            self.backpressure.metrics['current_queue_depth'] = self.backpressure.memory_queue.qsize()
+            queue.memory_queue.put_nowait(record_dict)
+            queue.metrics['records_enqueued'] += 1
+            queue.metrics['current_queue_depth'] = queue.memory_queue.qsize()
             self.metrics['records_enqueued'] += 1
         except asyncio.QueueFull:
             # Slow-path: fall back to async enqueue (disk spooling / drop policy)
-            asyncio.create_task(self._enqueue_record(record_dict))
+            asyncio.create_task(self._enqueue_record(record_dict, queue))
 
     def _protocol_record_to_raw_data(self, record: ProtocolRecord) -> Dict[str, Any]:
         """Convert ProtocolRecord to raw data format for normalizers.
@@ -636,13 +805,22 @@ class UnifiedBridge:
             'metadata': record.metadata or {},
         }
 
-    async def _enqueue_record(self, record: Dict[str, Any]):
+    async def _enqueue_record(self, record: Dict[str, Any], queue: BackpressureManager):
         """Enqueue record to backpressure queue.
 
         Args:
             record: Record dict
+            queue: the target's queue
         """
-        success = await self.backpressure.enqueue(record)
+        try:
+            success = await queue.enqueue(record)
+        except ValueError:          # drop_policy reject: queue and spool full
+            queue.dropped(record)
+            success = False
+        except Exception as e:  # noqa: BLE001 - e.g. the spool's disk: dropped and done in the log, not lost in the task
+            logger.error(f"Record dropped: the queue couldn't take it: {type(e).__name__}: {e}")
+            queue.dropped(record)
+            success = False
         if success:
             self.metrics['records_enqueued'] += 1
         else:
@@ -662,7 +840,15 @@ class UnifiedBridge:
         Args:
             target_id: ZeroBus target identifier
         """
+        writer = self.writers.get(target_id)
+        if writer is not None:
+            logger.info(f"Confirmed writer started for {target_id}")
+            await writer.run()
+            logger.info(f"Confirmed writer stopped for {target_id}")
+            return
+
         logger.info(f"Batch processor started for {target_id}")
+        queue = self._queue(target_id)
         batch: List[Any] = []
         last_flush_time = time.time()
 
@@ -676,7 +862,7 @@ class UnifiedBridge:
                 # Try to dequeue with timeout
                 try:
                     record = await asyncio.wait_for(
-                        self.backpressure.dequeue(),
+                        queue.dequeue(),
                         timeout=1.0
                     )
 
@@ -734,8 +920,11 @@ class UnifiedBridge:
 
 
     def _to_zerobus_message(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert internal record dict to the UC OPC-UA bronze schema."""
+        """Convert internal record dict to the UC OPC-UA bronze schema (a Sparkplug row: the sparkplug_raw columns)."""
         import re
+
+        if record.get('_record_kind') == SPARKPLUG_RAW:
+            return {column: record[column] for column in raw_row.COLUMNS}
 
         metadata = record.get('metadata') or {}
 
@@ -840,11 +1029,24 @@ class UnifiedBridge:
         if self.client_tasks:
             await asyncio.gather(*self.client_tasks.values(), return_exceptions=True)
 
+        # Confirmed writers: write what is queued (up to drain_timeout_seconds), then stop
+        for writer in self.writers.values():
+            writer.finish(self.drain_timeout_s)
+        if self.writers and self.batch_tasks:
+            await asyncio.wait(list(self.batch_tasks.values()), timeout=self.drain_timeout_s + 5.0)
+
         # Stop batch processors
         if self.batch_tasks:
             for task in self.batch_tasks.values():
                 task.cancel()
             await asyncio.gather(*self.batch_tasks.values(), return_exceptions=True)
+
+        # Write-ahead logs: fsync and close (rows not acknowledged stay in them for the next start)
+        for task in self.wal_tasks.values():
+            task.cancel()
+        await asyncio.gather(*self.wal_tasks.values(), return_exceptions=True)
+        for wal in self.wals.values():
+            wal.close()
 
         # Close ZeroBus clients
         for target_id, client in self.zerobus_clients.items():
@@ -864,9 +1066,11 @@ class UnifiedBridge:
         """
         return {
             'bridge': self.metrics,
-            'backpressure': self.backpressure.get_metrics(),
+            'backpressure': self._backpressure_metrics(),
+            'wal': {target_id: dataclasses.asdict(wal.status()) for target_id, wal in self.wals.items()},
             'zerobus_targets': {
-                target_id: client.get_metrics()
+                target_id: (dataclasses.asdict(self.writers[target_id].status()) if target_id in self.writers
+                            else client.get_metrics())
                 for target_id, client in self.zerobus_clients.items()
             },
             'clients': {
@@ -878,6 +1082,12 @@ class UnifiedBridge:
                 for name, client in self.clients.items()
             }
         }
+
+    def _backpressure_metrics(self) -> Dict[str, Any]:
+        """The queues' metrics summed (the keys of one queue), and per target under ``targets``."""
+        per_target = {target_id: queue.get_metrics() for target_id, queue in self.queues.items()}
+        keys = next(iter(per_target.values()), {}).keys()
+        return {**{k: sum(m.get(k, 0) for m in per_target.values()) for k in keys}, 'targets': per_target}
 
     def get_pipeline_diagnostics(self) -> Dict[str, Any]:
         """Get message transformation pipeline diagnostics per vendor format.
@@ -1005,6 +1215,7 @@ class UnifiedBridge:
 
         # Remove from clients dict
         del self.clients[source_name]
+        self._source_queues.pop(source_name, None)
 
         # Remove from sources list
         self.sources = [s for s in self.sources if s.get('name') != source_name]
@@ -1070,6 +1281,7 @@ class UnifiedBridge:
                     logger.error(f"Error closing ZeroBus client {target_id}: {e}")
 
             self.zerobus_clients.clear()
+            self.writers.clear()   # the write-ahead logs stay open: rows are still queued and logged
             self.zerobus_enabled = False
 
             logger.info("✓ ZeroBus streaming stopped successfully")
@@ -1095,6 +1307,6 @@ class UnifiedBridge:
             'zerobus_enabled': self.zerobus_enabled,
             'zerobus_targets': list(self.zerobus_clients.keys()),
             'normalization_enabled': self.normalization_enabled,
-            'backpressure_queue_size': self.backpressure.get_metrics().get('queue_size', 0),
+            'backpressure_queue_size': self._backpressure_metrics().get('queue_size', 0),
             'metrics': self.get_metrics(),
         }
