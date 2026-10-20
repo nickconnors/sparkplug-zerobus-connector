@@ -390,8 +390,30 @@ async def test_rows_the_queue_rejects_are_done_in_the_log(tmp_path, fake_streams
     await bridge.stop()
 
 
-async def test_without_confirmed_writes_there_is_no_log(tmp_path):
+async def test_the_log_is_only_for_tables_with_confirmed_writes(tmp_path, fake_streams, monkeypatch):
+    """confirmed_writes off: only a table that gets Sparkplug rows has confirmed writes, and so a log."""
+    class OriginalPath:
+        def __init__(self, cfg):
+            t = cfg["zerobus"]["target"]
+            self.full_table_name = f"{t['catalog']}.{t['schema']}.{t['table']}"
+            self.zerobus_endpoint, self.workspace_url, self.client_id, self.client_secret = "e", "w", "id", "s"
+
+        async def connect(self):
+            pass
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(unified_bridge, "ZeroBusClient", OriginalPath)
     cfg = bridge_config(tmp_path)
     cfg["zerobus"]["confirmed_writes"] = False
+    cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883", "enabled": False,
+                       "target_table": "c.s.sparkplug_raw_2"},
+                      {"name": "m", "protocol": "mqtt", "endpoint": "mqtt://localhost:1883", "enabled": False}]
     bridge = unified_bridge.UnifiedBridge(cfg)
-    assert not bridge.wal_enabled
+    await bridge.start_infra()
+    try:
+        assert sorted(bridge.zerobus_clients) == ["example.c.s.sparkplug_raw", "example.c.s.sparkplug_raw_2"]
+        assert list(bridge.writers) == ["example.c.s.sparkplug_raw_2"] == list(bridge.wals)
+    finally:
+        await bridge.stop()

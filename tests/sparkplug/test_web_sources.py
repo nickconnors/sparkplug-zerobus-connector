@@ -42,6 +42,7 @@ sources:
   protocol: sparkplug
   enabled: true
   endpoint: '${{env:SPTEST_ENDPOINT:mqtt://localhost:1883}}'
+  target_table: c.s.sparkplug_raw
   client_id: pyc
   username: sparkplug-user
   password: '${{env:SPTEST_PASSWORD}}'
@@ -71,7 +72,13 @@ class IdleClient:
     def __init__(self, config):
         self.config = config
         self.primary_host_id = config.get("primary_host_id") or None
+        self.offline_after_seconds = config.get("offline_after_seconds", 30)
+        self.online_after_seconds = config.get("online_after_seconds", 30)
         self.online_allowed = asyncio.Event()
+        self.is_connected = False
+
+    async def go_offline(self):
+        pass
 
     async def connect(self):
         await asyncio.Event().wait()
@@ -171,6 +178,7 @@ async def test_the_api_masks_passwords_and_secrets(page):
 async def test_a_sparkplug_source_added_from_the_page_keeps_its_settings(page, started):
     http, path, bridge = page
     form = {"name": "sp2", "protocol": "sparkplug", "endpoint": "mqtt://chariot:1883", "enabled": True,
+            "target_table": "c.s.sparkplug_raw",
             "primary_host_id": "h", "state_format": "v2", "offline_after_seconds": 10,
             "edge_node_schemas": {"enabled": True, "warehouse_id": "w", "procedures": ["x.y.on_nbirth"], "schema_prefix": ""}}
     async with http.post("/api/sources", json=form) as r:

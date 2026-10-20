@@ -48,6 +48,7 @@ export function SourcesPage() {
     area: "",
     line: "",
     equipment: "",
+    target_table: "",
   });
 
   const activeMap = useMemo(() => {
@@ -169,6 +170,7 @@ export function SourcesPage() {
       area: String((s as any)?.area ?? ""),
       line: String((s as any)?.line ?? ""),
       equipment: String((s as any)?.equipment ?? ""),
+      target_table: text(s.target_table),
     });
     const nbirth = (s.edge_node_schemas ?? {}) as Record<string, unknown>;
     setSparkplug({
@@ -188,7 +190,8 @@ export function SourcesPage() {
   const resetForm = useCallback(() => {
     setMode("create");
     setOriginalName("");
-    setForm({ name: "", protocol: "opcua", endpoint: "", enabled: true, site: "", area: "", line: "", equipment: "" });
+    setForm({ name: "", protocol: "opcua", endpoint: "", enabled: true, site: "", area: "", line: "", equipment: "",
+              target_table: "" });
     setSparkplug(EMPTY_SPARKPLUG);
   }, []);
 
@@ -204,6 +207,8 @@ export function SourcesPage() {
       line: form.line.trim(),
       equipment: form.equipment.trim(),
     };
+    // the source's own table (empty: the ZeroBus default); an edit sends it, so clearing it removes it
+    if (form.target_table.trim() || mode === "edit") payload.target_table = form.target_table.trim();
     if (form.protocol === "sparkplug") {
       // an edit sends every field shown (empty = cleared); the server keeps the fields the form doesn't show
       const seconds = (v: string) => (v.trim() === "" ? "" : Number(v));
@@ -334,6 +339,13 @@ export function SourcesPage() {
                 value={form.endpoint}
                 onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
                 placeholder="opc.tcp://192.168.1.100:4840"
+              />
+            </Field>
+            <Field label="Target table">
+              <TextInput
+                value={form.target_table}
+                onChange={(e) => setForm((f) => ({ ...f, target_table: e.target.value }))}
+                placeholder="catalog.schema.table (empty: the ZeroBus default table)"
               />
             </Field>
 

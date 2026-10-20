@@ -16,6 +16,7 @@ import logging
 from typing import Any, Dict, Optional, List
 from pathlib import Path
 
+from unified_connector.core.targets import parse_target_table
 from unified_connector.sparkplug.edge_node_schemas import nbirth_procedures
 
 logger = logging.getLogger(__name__)
@@ -294,7 +295,7 @@ def validate_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Validate optional fields
     optional_fields = ['enabled', 'site', 'area', 'line', 'equipment', 'security_mode',
                       'polling_mode', 'polling_interval_ms', 'subscription_mode',
-                      'normalization_enabled',
+                      'normalization_enabled', 'target_table',
                       # Sparkplug B (sparkplug/README.md); its username and password stay in the config file
                       'client_id', 'primary_host_id', 'state_format', 'offline_after_seconds',
                       'online_after_seconds', 'edge_node_schemas']
@@ -302,6 +303,13 @@ def validate_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for field in optional_fields:
         if field in config:
             validated[field] = validate_config_value(config[field])
+
+    # The source's own Zerobus table (core/targets.py); empty: the default table
+    if str(validated.get('target_table') or '').strip():
+        try:
+            validated['target_table'] = ".".join(parse_target_table(validated['target_table']))
+        except ValueError as e:
+            raise ValidationError(str(e))
 
     # Sparkplug B NBIRTH procedures: their names go into SQL text
     ens = validated.get('edge_node_schemas')

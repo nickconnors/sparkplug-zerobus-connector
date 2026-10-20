@@ -1078,6 +1078,7 @@ function fillSourceForm(source) {
   $("#srcName").value = source?.name ?? "";
   $("#srcProtocol").value = source?.protocol ?? "opcua";
   $("#srcEndpoint").value = source?.endpoint ?? "";
+  $("#srcTargetTable").value = source?.target_table ?? "";
   $("#srcEnabled").checked = Boolean(source?.enabled ?? true);
 
   $("#srcSite").value = source?.site ?? "";
@@ -1108,6 +1109,7 @@ function resetSourceForm() {
   $("#srcName").value = "";
   $("#srcProtocol").value = "opcua";
   $("#srcEndpoint").value = "";
+  $("#srcTargetTable").value = "";
   $("#srcEnabled").checked = true;
   $("#srcSite").value = "";
   $("#srcArea").value = "";
@@ -1137,6 +1139,7 @@ async function submitSourceForm(e) {
   const mode = $("#srcMode").value;
   // An edit sends every field the form shows (empty = cleared); fields it doesn't show are kept
   for (const [id, key] of [
+    ["#srcTargetTable", "target_table"],
     ["#srcSite", "site"],
     ["#srcArea", "area"],
     ["#srcLine", "line"],

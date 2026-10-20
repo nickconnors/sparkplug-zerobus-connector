@@ -28,6 +28,7 @@ from unified_connector.core.backpressure import BackpressureManager
 from unified_connector.core.zerobus_client import ZeroBusClient
 from unified_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
 from unified_connector.core.wal import SEQ_FIELD, WriteAheadLog
+from unified_connector.core import targets as source_tables
 from unified_connector.sparkplug import raw_row
 from unified_connector.sparkplug.edge_node_schemas import BirthNotifier, DatabricksSql, nbirth_procedures, quoted_table
 from unified_connector.sparkplug.host import HostState, HostSupervisor
@@ -98,8 +99,9 @@ class UnifiedBridge:
         # ZeroBus clients (one per unique target)
         self.zerobus_clients: Dict[str, ZeroBusClient] = {}
 
-        # zerobus.confirmed_writes: rows leave the queue only once Zerobus acknowledged them (ConfirmedWriter,
-        # one per target, own streams); otherwise ZeroBusClient.send_batch as before
+        # Confirmed writes (rows leave the queue only once Zerobus acknowledged them: ConfirmedWriter, one per
+        # target, own streams) for every table that gets Sparkplug rows, and with zerobus.confirmed_writes for
+        # the others too; otherwise ZeroBusClient.send_batch as before (_confirmed)
         self.confirmed_writes = bool(self.zerobus_config.get('confirmed_writes', False))
         self.drain_timeout_s = float(self.zerobus_config.get('drain_timeout_seconds', 15.0))
         self.writers: Dict[str, ConfirmedWriter] = {}
@@ -108,9 +110,6 @@ class UnifiedBridge:
         # replayed after a crash; core/wal.py), off by default
         self.wal_config = self.zerobus_config.get('wal') or {}
         self.wal_enabled = _enabled(self.wal_config.get('enabled', False))
-        if self.wal_enabled and not self.confirmed_writes:
-            logger.warning("zerobus.wal needs zerobus.confirmed_writes (acknowledged rows); not logging rows")
-            self.wal_enabled = False
         self.wals: Dict[str, WriteAheadLog] = {}
         self.wal_tasks: Dict[str, asyncio.Task] = {}
         self._queue_wals: Dict[BackpressureManager, WriteAheadLog] = {}
@@ -267,40 +266,106 @@ class UnifiedBridge:
             target_id = self._get_target_id(merged_target)
             targets[target_id] = merged_target
 
+        # The sources' own target tables
+        for source in self.sources:
+            try:
+                target_config = source_tables.target_config(source, self.zerobus_config)
+            except ValueError as e:
+                logger.error(f"[{source.get('name')}] {e}")
+                continue
+            if target_config.get('workspace_host'):
+                targets[self._get_target_id(target_config)] = target_config
+
         # Create ZeroBus clients for each target
         for target_id, target_config in targets.items():
-            try:
-                # Build ZeroBus config for this target
-                zb_config = {
-                    'zerobus': {
-                        'enabled': True,
-                        'workspace_host': target_config['workspace_host'],
-                        'zerobus_endpoint': self.zerobus_config.get('zerobus_endpoint'),
-                        'target': {
-                            'catalog': target_config.get('catalog', 'main'),
-                            'schema': target_config.get('schema', 'iot_data'),
-                            'table': target_config.get('table', 'sensor_readings'),
-                        },
-                        'auth': self.zerobus_config.get('auth', {}),
-                        'batch': self.zerobus_config.get('batch', {}),
-                    }
-                }
-
-                client = ZeroBusClient(zb_config)
-                if self.confirmed_writes:
-                    streams = ZerobusRowStreams(client.zerobus_endpoint, client.workspace_url, client.full_table_name,
-                                                client.client_id, client.client_secret)
-                    await self._open_wal(target_id)
-                    self.writers[target_id] = self._make_writer(target_id, streams.open)
-                else:
-                    await client.connect()
-
-                self.zerobus_clients[target_id] = client
-                logger.info(f"✓ ZeroBus client connected: {target_id}")
-
-            except Exception as e:
-                logger.error(f"Failed to initialize ZeroBus client for {target_id}: {e}")
+            await self._create_target(target_id, target_config)
         self._reattach_notifiers()   # Zerobus started again: the running Sparkplug sources' NBIRTH callers
+
+    def _confirmed(self, target_id: str) -> bool:
+        """Confirmed writes for this table: it gets Sparkplug rows (they need them: the primary host, the NBIRTH
+        call), or zerobus.confirmed_writes is on."""
+        return self.confirmed_writes or any(
+            source_tables.is_sparkplug(s) and self._get_target_for_source(s.get('name')) == target_id for s in self.sources)
+
+    async def _create_target(self, target_id: str, target_config: Dict[str, Any]) -> None:
+        """The table's ZeroBus client, and its ConfirmedWriter (with its write-ahead log) if _confirmed."""
+        try:
+            # Build ZeroBus config for this target
+            zb_config = {
+                'zerobus': {
+                    'enabled': True,
+                    'workspace_host': target_config['workspace_host'],
+                    'zerobus_endpoint': self.zerobus_config.get('zerobus_endpoint'),
+                    'target': {
+                        'catalog': target_config.get('catalog', 'main'),
+                        'schema': target_config.get('schema', 'iot_data'),
+                        'table': target_config.get('table', 'sensor_readings'),
+                    },
+                    'auth': self.zerobus_config.get('auth', {}),
+                    'batch': self.zerobus_config.get('batch', {}),
+                }
+            }
+
+            client = ZeroBusClient(zb_config)
+            if self._confirmed(target_id):
+                streams = ZerobusRowStreams(client.zerobus_endpoint, client.workspace_url, client.full_table_name,
+                                            client.client_id, client.client_secret)
+                await self._open_wal(target_id)
+                self.writers[target_id] = self._make_writer(target_id, streams.open)
+            else:
+                await client.connect()
+
+            self.zerobus_clients[target_id] = client
+            logger.info(f"✓ ZeroBus client connected: {target_id}" + (" (confirmed writes)" if target_id in self.writers else ""))
+
+        except Exception as e:
+            logger.error(f"Failed to initialize ZeroBus client for {target_id}: {e}")
+
+    async def _ensure_target(self, source_config: Dict[str, Any]) -> None:
+        """While Zerobus runs: the table of a source being started (a target_table set from the page is new),
+        or confirmed writes for a table on the original path that now gets Sparkplug rows (no other source
+        writes there: mixed_tables refuses that, so its queue is idle)."""
+        if not self.zerobus_enabled:
+            return
+        target_config = source_tables.target_config(source_config, self.zerobus_config)
+        if not target_config.get('workspace_host'):
+            return
+        target_id = self._get_target_id(target_config)
+        if target_id in self.zerobus_clients:
+            if target_id in self.writers or not self._confirmed(target_id):
+                return
+            task = self.batch_tasks.pop(target_id, None)
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            old = self.zerobus_clients.pop(target_id)
+            try:
+                await old.close()
+            except Exception as e:  # noqa: BLE001 - the original path's stream may not close cleanly
+                logger.debug(f"closing the ZeroBus client of {target_id}: {e}")
+            logger.info(f"{target_id}: confirmed writes from now on (it gets Sparkplug rows)")
+        self._source_queues.clear()
+        await self._create_target(target_id, target_config)
+        if target_id in self.zerobus_clients:
+            self.batch_tasks[target_id] = asyncio.create_task(self._batch_processor(target_id))
+
+    def target_conflicts(self, sources: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+        """Tables that would get Sparkplug rows and other rows (core/targets.py), for these sources (default:
+        the configured ones); a source with a target_table that isn't catalog.schema.table counts as an error."""
+        problems = []
+        resolvable = []
+        for s in self.sources if sources is None else sources:
+            try:
+                source_tables.target_config(s, self.zerobus_config)
+                resolvable.append(s)
+            except ValueError as e:
+                problems.append(f"{s.get('name')}: {e}")
+        return problems + source_tables.mixed_tables(resolvable, self._table_of)
+
+    def _table_of(self, source: Dict[str, Any]):
+        """(target id, catalog.schema.table) of a source; ValueError for a malformed target_table."""
+        target_config = source_tables.target_config(source, self.zerobus_config)
+        return self._get_target_id(target_config), source_tables.table_name(target_config)
 
     async def _open_wal(self, target_id: str) -> None:
         """The target's write-ahead log (once per process: Zerobus may be stopped and started again), its rows
@@ -427,18 +492,12 @@ class UnifiedBridge:
         Returns:
             Target ID
         """
-        # Check if source has specific target
-        source_targets = self.zerobus_config.get('source_targets', {})
-        if source_name in source_targets:
-            target_config = {
-                **self.zerobus_config.get('default_target', {}),
-                **source_targets[source_name]
-            }
-            return self._get_target_id(target_config)
-
-        # Use default target
-        default_target = self.zerobus_config.get('default_target', {})
-        return self._get_target_id(default_target)
+        # The source's target_table, else zerobus.source_targets.<name>, else the default (core/targets.py)
+        source = next((s for s in self.sources if s.get('name') == source_name), {'name': source_name})
+        try:
+            return self._get_target_id(source_tables.target_config(source, self.zerobus_config))
+        except ValueError:          # a target_table that isn't catalog.schema.table: refused at start
+            return self._get_target_id(self.zerobus_config.get('default_target', {}))
 
     async def _start_client(self, source_config: Dict[str, Any]):
         """Start a single protocol client with reconnection loop.
@@ -448,6 +507,20 @@ class UnifiedBridge:
         """
         source_name = source_config.get('name', 'unknown')
         protocol_type = source_config.get('protocol', 'opcua')
+        key, table = self._table_of(source_config)   # ValueError: target_table malformed
+        if source_tables.is_sparkplug(source_config):
+            # its rows and other sources' rows in one table would block each other (core/targets.py)
+            others = []
+            for s in self.sources:
+                try:
+                    if not source_tables.is_sparkplug(s) and self._table_of(s)[0] == key:
+                        others.append(str(s.get('name')))
+                except ValueError:
+                    pass
+            if others:
+                raise ValueError(f"not started: its table {table} also gets other rows ({', '.join(others)}); "
+                                 "give it a target table of its own (target_table)")
+        await self._ensure_target(source_config)
 
         # Add normalization flag to source config
         source_config['normalization_enabled'] = self.normalization_enabled
@@ -474,16 +547,12 @@ class UnifiedBridge:
         """A Sparkplug source's primary host supervisor and NBIRTH caller, on its target's confirmed writer."""
         target_id = self._get_target_for_source(source_name)
         if client.primary_host_id:
-            if not self.confirmed_writes:
-                logger.warning(f"[{source_name}] primary host {client.primary_host_id} without zerobus.confirmed_writes: "
-                               "ONLINE whenever connected (no edge buffering during Databricks outages)")
-                client.online_allowed.set()
-            else:
-                # follows the target's writer of the moment: none (Zerobus stopped or not started) is OFFLINE
-                supervisor = HostSupervisor(client, lambda: self._writer_status(target_id),
-                                            HostState(client.offline_after_seconds, client.online_after_seconds), name=source_name)
-                self.host_supervisors[source_name] = supervisor
-                self.host_tasks[source_name] = asyncio.create_task(supervisor.run())
+            # follows the table's writer of the moment (a Sparkplug table always has confirmed writes): none
+            # (Zerobus stopped or not started) is OFFLINE, so the edges buffer
+            supervisor = HostSupervisor(client, lambda: self._writer_status(target_id),
+                                        HostState(client.offline_after_seconds, client.online_after_seconds), name=source_name)
+            self.host_supervisors[source_name] = supervisor
+            self.host_tasks[source_name] = asyncio.create_task(supervisor.run())
         self._attach_notifier(source_name, source_config)
 
     def _writer_status(self, target_id: str):
@@ -519,8 +588,7 @@ class UnifiedBridge:
                 return
             zerobus_client = self.zerobus_clients.get(target_id)
             if writer is None or zerobus_client is None:
-                logger.warning(f"[{source_name}] edge_node_schemas needs zerobus.confirmed_writes and Zerobus running; "
-                               "no NBIRTH procedure calls until then")
+                logger.warning(f"[{source_name}] no NBIRTH procedure calls until Zerobus runs")
                 return
             try:
                 procedures = nbirth_procedures(schemas)

@@ -337,6 +337,11 @@ class WebServer:
                     status=400
                 )
 
+            # Sparkplug rows and other rows can't share a table (core/targets.py)
+            conflicts = self.bridge.target_conflicts(self.bridge.sources + [data])
+            if conflicts:
+                return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
+
             # Add to bridge
             await self.bridge.add_source(
                 source_name=data['name'],
@@ -401,7 +406,11 @@ class WebServer:
             current = next((s for s in self.bridge.sources if s.get('name') == source_name), None)
             if current is None:
                 return web.json_response({'status': 'error', 'message': f"Source not found: {source_name}"}, status=404)
-            await self.bridge.update_source(source_name, _edited(current, current, data))
+            edited = _edited(current, current, data)
+            conflicts = self.bridge.target_conflicts([edited if s is current else s for s in self.bridge.sources])
+            if conflicts:   # Sparkplug rows and other rows can't share a table (core/targets.py)
+                return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
+            await self.bridge.update_source(source_name, edited)
 
             # Update config file (unchanged fields keep the file's spelling, e.g. a ${env:...} placeholder)
             self._save_sources(lambda sources: [
@@ -1060,6 +1069,7 @@ class WebServer:
               </div>
 
               <label>Endpoint <input id="srcEndpoint" placeholder="opc.tcp://192.168.1.100:4840" required /></label>
+              <label>Target table <input id="srcTargetTable" placeholder="catalog.schema.table (empty: the ZeroBus default table)" /></label>
 
               <div id="srcSparkplugFields" style="display:none">
                 <div class="split">

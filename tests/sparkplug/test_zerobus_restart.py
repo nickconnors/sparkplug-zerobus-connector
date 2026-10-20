@@ -162,13 +162,18 @@ async def test_a_primary_host_started_before_zerobus_waits_offline_for_its_write
     await bridge.stop()
 
 
-async def test_without_confirmed_writes_a_primary_host_is_online_whenever_connected(tmp_path, hosts):
+async def test_without_confirmed_writes_a_sparkplug_table_still_has_them_and_the_host_follows_it(tmp_path, acked, hosts):
     cfg = bridge_config(tmp_path)
     cfg["zerobus"].update({"enabled": False, "confirmed_writes": False})
     cfg["sources"] = [sparkplug_source()]
     bridge = unified_bridge.UnifiedBridge(cfg)
     await bridge.start()
-    assert "sp" not in bridge.host_supervisors and hosts["sp"].online_allowed.is_set()
+    supervisor = bridge.host_supervisors["sp"]
+    assert await supervisor.tick() == "OFFLINE"            # no writer yet: nothing is stored
+    await bridge.start_zerobus()
+    assert TARGET in bridge.writers                         # the table gets Sparkplug rows: confirmed writes
+    await wait_for(lambda: bridge.writers[TARGET].status().last_success is not None)
+    assert await supervisor.tick() == "ONLINE"
     await bridge.stop()
 
 
