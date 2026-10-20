@@ -175,6 +175,9 @@ class OPCUAClient(ProtocolClient):
         """Establish OPC-UA connection with security."""
         if self._client is not None:
             return
+        # The bridge calls stop() after a connection error and then connects this client again: the stop must
+        # not end the new connection's polling or subscription loop at once
+        self._stop_evt.clear()
 
         # Validate security configuration
         if not self.security_manager.validate_configuration():

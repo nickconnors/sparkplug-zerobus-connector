@@ -138,6 +138,10 @@ class ProtocolClient(ABC):
         """Request the client to stop."""
         self._stop_evt.set()
 
+    async def stop(self) -> None:
+        """Called by the bridge before disconnect() when the source stops, and after a connection error before
+        it connects the same client again; nothing by default."""
+
     def _emit_stats(self, delta: dict[str, Any]) -> None:
         """Emit stats update."""
         if self.on_stats:

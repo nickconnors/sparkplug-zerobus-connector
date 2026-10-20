@@ -16,6 +16,7 @@ import asyncio
 import collections
 import dataclasses
 import logging
+import math
 import re
 import time
 from pathlib import Path
@@ -1177,8 +1178,9 @@ class UnifiedBridge:
             'vendor_format': str(vendor_format),  # Vendor format (kepware, honeywell, sparkplug_b, etc.)
         }
 
-        if msg.get('value_num') is None:
-            msg.pop('value_num', None)
+        value_num = msg.get('value_num')
+        if value_num is None or (isinstance(value_num, float) and not math.isfinite(value_num)):
+            msg.pop('value_num', None)   # also NaN and infinity: JSON has none (the value column keeps it as text)
 
         return msg
 
