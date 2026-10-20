@@ -448,12 +448,11 @@ class ZeroBusClient:
                 logger.info(f"Sending batch of {len(records)} records to {self.full_table_name} "
                            f"(attempt {attempt + 1}/{self.max_retries})")
 
-                # Send records individually (SDK handles buffering internally)
+                # Send records individually (SDK handles buffering internally), without waiting for the
+                # acknowledgement: in SDK 1.x ingest_record returns a coroutine for it, and one never awaited
+                # is a RuntimeWarning per record
                 for record in records:
-                    # ingest_record returns a future that can be awaited for durability
-                    future = await self._stream.ingest_record(record)
-                    # Await for durability confirmation (optional, adds latency)
-                    # await future
+                    await self._stream.ingest_record_offset(record)
 
                 # Record success
                 self.circuit_breaker.record_success()
