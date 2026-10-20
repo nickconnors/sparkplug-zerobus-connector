@@ -85,7 +85,7 @@ def validate_protocol(protocol: str) -> str:
     Raises:
         ValidationError: If protocol is invalid
     """
-    valid_protocols = ['opcua', 'mqtt', 'modbus']
+    valid_protocols = ['opcua', 'mqtt', 'modbus', 'sparkplug']
 
     protocol = protocol.lower().strip()
 
@@ -292,7 +292,10 @@ def validate_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Validate optional fields
     optional_fields = ['enabled', 'site', 'area', 'line', 'equipment', 'security_mode',
                       'polling_mode', 'polling_interval_ms', 'subscription_mode',
-                      'normalization_enabled']
+                      'normalization_enabled',
+                      # Sparkplug B (sparkplug/README.md); its username and password stay in the config file
+                      'client_id', 'primary_host_id', 'state_format', 'offline_after_seconds',
+                      'online_after_seconds', 'edge_node_schemas']
 
     for field in optional_fields:
         if field in config:

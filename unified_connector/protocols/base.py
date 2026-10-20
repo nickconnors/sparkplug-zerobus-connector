@@ -14,6 +14,7 @@ class ProtocolType(str, Enum):
     OPCUA = "opcua"
     MQTT = "mqtt"
     MODBUS = "modbus"
+    SPARKPLUG = "sparkplug"   # Sparkplug B over MQTT: sparkplug_raw rows (protocols/sparkplug_client.py)
 
 
 @dataclass

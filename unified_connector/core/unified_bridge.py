@@ -29,11 +29,14 @@ from unified_connector.core.zerobus_client import ZeroBusClient
 from unified_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
 from unified_connector.core.wal import SEQ_FIELD, WriteAheadLog
 from unified_connector.sparkplug import raw_row
+from unified_connector.sparkplug.edge_node_schemas import BirthNotifier, DatabricksSql, nbirth_procedures, quoted_table
+from unified_connector.sparkplug.host import HostState, HostSupervisor
 
 logger = logging.getLogger(__name__)
 
 # _record_kind of a queued Sparkplug row (written with the sparkplug_raw columns)
 SPARKPLUG_RAW = 'sparkplug_raw'
+HEALTHY_SESSION_S = 60.0   # a source connection that lasted this long starts its reconnect backoff again
 
 
 def _enabled(value: Any) -> bool:
@@ -113,6 +116,16 @@ class UnifiedBridge:
         self._queue_wals: Dict[BackpressureManager, WriteAheadLog] = {}
         # rows the log replays, per target: the writer takes them before the queue (in order, none dropped)
         self._wal_replay: Dict[str, collections.deque] = {}
+        # per target, across a Zerobus stop/start: the log sequences taken since the last acknowledgement and
+        # the stopped writer's unacknowledged batch (the next writer sends it first)
+        self._taken: Dict[str, List[int]] = {}
+        self._unacked: Dict[str, List[str]] = {}
+
+        # Sparkplug sources: the primary host's supervisor and the NBIRTH -> create_edge_node_schema caller
+        self.host_supervisors: Dict[str, HostSupervisor] = {}
+        self.host_tasks: Dict[str, asyncio.Task] = {}
+        self.birth_notifiers: Dict[str, BirthNotifier] = {}
+        self._notifier_writers: Dict[str, ConfirmedWriter] = {}
 
         # Protocol clients
         self.clients: Dict[str, ProtocolClient] = {}
@@ -287,10 +300,11 @@ class UnifiedBridge:
 
             except Exception as e:
                 logger.error(f"Failed to initialize ZeroBus client for {target_id}: {e}")
+        self._reattach_notifiers()   # Zerobus started again: the running Sparkplug sources' NBIRTH callers
 
     async def _open_wal(self, target_id: str) -> None:
         """The target's write-ahead log (once per process: Zerobus may be stopped and started again), its rows
-        not acknowledged before the last stop queued again ahead of new ones."""
+        not acknowledged before the last stop written first."""
         if not self.wal_enabled or target_id in self.wals:
             return
         cfg = self.wal_config
@@ -315,7 +329,7 @@ class UnifiedBridge:
         batch = self.zerobus_config.get('batch', {})
         bp = self._queue(target_id)
         wal = self.wals.get(target_id)
-        taken: List[int] = []   # log sequences taken since the last acknowledgement (one batch in flight at a time)
+        taken = self._taken.setdefault(target_id, [])   # log sequences since the last acknowledgement (one batch in flight)
 
         replay = self._wal_replay.setdefault(target_id, collections.deque())
 
@@ -353,6 +367,7 @@ class UnifiedBridge:
             queue_depth=lambda: len(replay) + bp.memory_queue.qsize() + len(bp.spool_files),
             queue_high_water=int(bp.max_queue_size * 0.8),
             name=target_id,
+            batch=self._unacked.pop(target_id, None),
         )
         if wal is not None:
             def acknowledged(_batch: List[str]) -> None:
@@ -448,10 +463,83 @@ class UnifiedBridge:
         )
 
         self.clients[source_name] = client
+        if str(protocol_type).lower() in ('sparkplug', 'sparkplug_b'):   # as the factory: any case
+            self._attach_sparkplug(source_name, source_config, client)
 
         # Start client with reconnection loop
         task = asyncio.create_task(self._client_lifecycle(source_name, client))
         self.client_tasks[source_name] = task
+
+    def _attach_sparkplug(self, source_name: str, source_config: Dict[str, Any], client) -> None:
+        """A Sparkplug source's primary host supervisor and NBIRTH caller, on its target's confirmed writer."""
+        target_id = self._get_target_for_source(source_name)
+        if client.primary_host_id:
+            if not self.confirmed_writes:
+                logger.warning(f"[{source_name}] primary host {client.primary_host_id} without zerobus.confirmed_writes: "
+                               "ONLINE whenever connected (no edge buffering during Databricks outages)")
+                client.online_allowed.set()
+            else:
+                # follows the target's writer of the moment: none (Zerobus stopped or not started) is OFFLINE
+                supervisor = HostSupervisor(client, lambda: self._writer_status(target_id),
+                                            HostState(client.offline_after_seconds, client.online_after_seconds), name=source_name)
+                self.host_supervisors[source_name] = supervisor
+                self.host_tasks[source_name] = asyncio.create_task(supervisor.run())
+        self._attach_notifier(source_name, source_config)
+
+    def _writer_status(self, target_id: str):
+        writer = self.writers.get(target_id)
+        return None if writer is None else writer.status()
+
+    def _reattach_notifiers(self) -> None:
+        """After the writers were (re)created: each running Sparkplug source's NBIRTH caller on its target's new writer."""
+        configs = {s.get('name'): s for s in self.sources}
+        for name, client in self.clients.items():
+            if client.protocol_type.value == 'sparkplug' and name in configs:
+                try:
+                    self._attach_notifier(name, configs[name])
+                except Exception as e:  # noqa: BLE001 - one source must not stop Zerobus from starting
+                    logger.error(f"[{name}] NBIRTH procedure calls not set up: {e}")
+
+    def _attach_notifier(self, source_name: str, source_config: Dict[str, Any]) -> None:
+        """The NBIRTH caller, listening on the target's current writer (moved there if it listened on an
+        earlier one; created once a writer exists)."""
+        schemas = source_config.get('edge_node_schemas')
+        if schemas and _enabled(schemas.get('enabled', True)):
+            target_id = self._get_target_for_source(source_name)
+            writer = self.writers.get(target_id)
+            notifier = self.birth_notifiers.get(source_name)
+            if notifier is not None:
+                old = self._notifier_writers.pop(source_name, None)
+                if old is not None and old is not writer:
+                    old.remove_listener(notifier.accept)
+                if writer is not None:
+                    if old is not writer:
+                        writer.add_listener(notifier.accept)
+                    self._notifier_writers[source_name] = writer
+                return
+            zerobus_client = self.zerobus_clients.get(target_id)
+            if writer is None or zerobus_client is None:
+                logger.warning(f"[{source_name}] edge_node_schemas needs zerobus.confirmed_writes and Zerobus running; "
+                               "no NBIRTH procedure calls until then")
+                return
+            try:
+                procedures = nbirth_procedures(schemas)
+                quoted_table(zerobus_client.full_table_name)
+            except ValueError as e:                 # the source still writes its rows
+                logger.error(f"[{source_name}] {e}; no NBIRTH procedure calls")
+                return
+            warehouse_id = str(schemas.get('warehouse_id') or '').strip()
+            if not warehouse_id:
+                logger.error(f"[{source_name}] edge_node_schemas needs warehouse_id (a SQL warehouse); no NBIRTH procedure calls")
+                return
+            sql = DatabricksSql(zerobus_client.workspace_url, zerobus_client.client_id, zerobus_client.client_secret,
+                                warehouse_id)
+            notifier = BirthNotifier(sql, zerobus_client.full_table_name, procedures,
+                                     prefix=str(schemas.get('schema_prefix') or '').strip() or 'nb')
+            writer.add_listener(notifier.accept)
+            self.birth_notifiers[source_name] = notifier
+            self._notifier_writers[source_name] = writer
+            logger.info(f"[{source_name}] on NBIRTH: CALL {', '.join(procedures)}")
 
     async def _client_lifecycle(self, source_name: str, client: ProtocolClient):
         """Manage protocol client lifecycle with automatic reconnection.
@@ -463,10 +551,12 @@ class UnifiedBridge:
         reconnect_delay = self.reconnect_initial_delay_sec
 
         while not self._shutdown:
+            connected_at = None
             try:
                 logger.info(f"[{source_name}] Connecting to {client.endpoint}...")
                 await client.connect()
                 logger.info(f"[{source_name}] ✓ Connected")
+                connected_at = time.monotonic()
 
                 # Start subscription/polling
                 logger.info(f"[{source_name}] Starting data collection...")
@@ -496,7 +586,10 @@ class UnifiedBridge:
                 if not self.reconnect_enabled or self._shutdown:
                     break
 
-                # Exponential backoff with jitter
+                # Exponential backoff with jitter; a connection that lasted starts it again (one failing right
+                # after each connect, e.g. a refused subscribe, backs off more each time)
+                if connected_at is not None and time.monotonic() - connected_at >= HEALTHY_SESSION_S:
+                    reconnect_delay = self.reconnect_initial_delay_sec
                 jitter = reconnect_delay * 0.1 * (2 * (time.time() % 1) - 0.5)
                 sleep_time = min(reconnect_delay + jitter, self.reconnect_max_delay_sec)
 
@@ -542,6 +635,11 @@ class UnifiedBridge:
         if source_name not in self.clients:
             return {'status': 'ok', 'message': f"Source already stopped: {source_name}"}
 
+        host_task = self.host_tasks.pop(source_name, None)
+        if host_task is not None:
+            host_task.cancel()
+            await asyncio.gather(host_task, return_exceptions=True)
+        self.host_supervisors.pop(source_name, None)
         client = self.clients.get(source_name)
         try:
             if client is not None:
@@ -549,6 +647,13 @@ class UnifiedBridge:
                 await client.disconnect()
         except Exception as e:
             logger.warning(f"Error stopping source {source_name}: {e}")
+        # its NBIRTH caller off the writer, or a restarted source would add a second one
+        notifier = self.birth_notifiers.pop(source_name, None)
+        writer = self._notifier_writers.pop(source_name, None)
+        if notifier is not None:
+            if writer is not None:
+                writer.remove_listener(notifier.accept)
+            await notifier.stop()
 
         if source_name in self.client_tasks:
             task = self.client_tasks[source_name]
@@ -1016,7 +1121,13 @@ class UnifiedBridge:
         self._shutdown = True
         self._starting = False
 
-        # Stop all protocol clients
+        # Sparkplug primary hosts: no supervisor may go ONLINE again while stopping
+        for task in self.host_tasks.values():
+            task.cancel()
+        if self.host_tasks:
+            await asyncio.gather(*self.host_tasks.values(), return_exceptions=True)
+
+        # Stop all protocol clients (a Sparkplug primary host publishes OFFLINE first, so the edges start buffering)
         for source_name, client in self.clients.items():
             try:
                 logger.info(f"Stopping source: {source_name}")
@@ -1025,8 +1136,11 @@ class UnifiedBridge:
             except Exception as e:
                 logger.error(f"Error stopping {source_name}: {e}")
 
-        # Wait for client tasks
+        # Wait for client tasks (one waiting to go ONLINE is cancelled)
         if self.client_tasks:
+            _, pending = await asyncio.wait(list(self.client_tasks.values()), timeout=5.0)
+            for task in pending:
+                task.cancel()
             await asyncio.gather(*self.client_tasks.values(), return_exceptions=True)
 
         # Confirmed writers: write what is queued (up to drain_timeout_seconds), then stop
@@ -1056,7 +1170,54 @@ class UnifiedBridge:
             except Exception as e:
                 logger.error(f"Error closing ZeroBus client {target_id}: {e}")
 
+        for notifier in self.birth_notifiers.values():
+            await notifier.stop()
+
         logger.info("✓ UnifiedBridge stopped")
+
+    def sparkplug_health(self) -> Dict[str, Dict[str, Any]]:
+        """Per Sparkplug source: host state, MQTT, rows, Zerobus writer, NBIRTH calls, write-ahead log."""
+        def iso(t):
+            return None if t is None else time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(t)) + f".{int(t % 1 * 1000):03d}Z"
+        out: Dict[str, Dict[str, Any]] = {}
+        for name, client in self.clients.items():
+            if client.protocol_type.value != 'sparkplug':
+                continue
+            s = client.stats()
+            supervisor = self.host_supervisors.get(name)
+            h: Dict[str, Any] = {
+                'state': supervisor.state.mode if supervisor else ('ONLINE' if client.is_connected else 'OFFLINE'),
+                'primary_host_id': client.primary_host_id, 'mqtt_connected': client.is_connected,
+                'mqtt_online': client.is_online, 'state_topic': client.state_topic,
+                'messages_received': s['messages_received'], 'rows_queued': s['rows'],
+                'messages_skipped': sum(v for k, v in s.items() if k.startswith('skipped_')),
+                'topics_malformed': s['skipped_malformed_topic'], 'payloads_undecodable': s['skipped_undecodable_payload'],
+                'state_republished': s['state_republished'], 'rows_failed': s['rows_failed'],
+            }
+            writer = self.writers.get(self._get_target_for_source(name))
+            if writer is not None:
+                w = writer.status()
+                h.update({'queue_depth': w.queue_depth, 'queue_high_water': w.queue_high_water,
+                          'queue_dropped': self._queue_for_source(name).metrics.get('records_dropped', 0),
+                          'zerobus_stream_open': w.stream_open, 'rows_written': w.written, 'rows_too_large': w.rows_too_large,
+                          'rows_unconvertible': w.rows_unconvertible,
+                          'zerobus_failures': w.failures, 'batch_in_flight': w.batch_in_flight,
+                          'zerobus_failing_since': iso(w.failing_since), 'batch_pending_since': iso(w.pending_since),
+                          'zerobus_last_success': iso(w.last_success), 'last_error': w.last_error})
+            wal = self.wals.get(self._get_target_for_source(name))
+            if wal is not None:
+                st = wal.status()
+                h.update({'wal_pending': st.pending, 'wal_rows_appended': st.rows_appended,
+                          'wal_rows_replayed': st.rows_replayed, 'wal_rows_not_logged': st.rows_not_logged,
+                          'wal_bytes': st.bytes, 'wal_failures': st.failures, 'wal_last_error': st.last_error})
+            notifier = self.birth_notifiers.get(name)
+            if notifier is not None:
+                n = notifier.status()
+                h.update({'nbirths_written': n.births, 'edge_node_schema_calls': n.calls,
+                          'edge_node_schema_failures': n.failures, 'edge_node_schema_gave_up': n.gave_up,
+                          'edge_node_schema_pending': n.pending, 'edge_node_schema_last_error': n.last_error})
+            out[name] = h
+        return out
 
     def get_metrics(self) -> Dict[str, Any]:
         """Get comprehensive metrics from all components.
@@ -1078,6 +1239,7 @@ class UnifiedBridge:
                     'connected': client._client is not None if hasattr(client, '_client') else False,
                     'protocol': client.protocol_type.value,
                     'endpoint': client.endpoint,
+                    **({'sparkplug': client.stats()} if client.protocol_type.value == 'sparkplug' else {}),
                 }
                 for name, client in self.clients.items()
             }
@@ -1264,6 +1426,13 @@ class UnifiedBridge:
 
             logger.info("Stopping ZeroBus streaming...")
 
+            # Confirmed writers end after their current step (a take in progress completes; a batch not
+            # acknowledged is kept for the next writer), then the batch processors are cancelled
+            for writer in self.writers.values():
+                writer.finish(0)
+            if self.writers and self.batch_tasks:
+                await asyncio.wait(list(self.batch_tasks.values()), timeout=5.0)
+
             # Stop batch processors
             if self.batch_tasks:
                 for task in self.batch_tasks.values():
@@ -1281,6 +1450,11 @@ class UnifiedBridge:
                     logger.error(f"Error closing ZeroBus client {target_id}: {e}")
 
             self.zerobus_clients.clear()
+            for target_id, writer in self.writers.items():
+                self._unacked[target_id] = writer.unacknowledged()   # sent first by the next writer
+            for name, writer in list(self._notifier_writers.items()):
+                writer.remove_listener(self.birth_notifiers[name].accept)
+                del self._notifier_writers[name]
             self.writers.clear()   # the write-ahead logs stay open: rows are still queued and logged
             self.zerobus_enabled = False
 

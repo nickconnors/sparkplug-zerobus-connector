@@ -7,6 +7,7 @@ from unified_connector.protocols.base import ProtocolClient, ProtocolRecord, Pro
 from unified_connector.protocols.mqtt_client import MQTTClient
 from unified_connector.protocols.modbus_client import ModbusClient
 from unified_connector.protocols.opcua_client import OPCUAClient
+from unified_connector.protocols.sparkplug_client import SparkplugClient
 
 
 def create_protocol_client(
@@ -42,6 +43,8 @@ def create_protocol_client(
         return MQTTClient(source_name, endpoint, config, on_record, on_stats)
     elif protocol_type in (ProtocolType.MODBUS, "modbus"):
         return ModbusClient(source_name, endpoint, config, on_record, on_stats)
+    elif protocol_type in (ProtocolType.SPARKPLUG, "sparkplug", "sparkplug_b"):
+        return SparkplugClient(source_name, endpoint, config, on_record, on_stats)
     else:
         raise ValueError(f"Unsupported protocol type: {protocol_type}")
 

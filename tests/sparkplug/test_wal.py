@@ -208,8 +208,8 @@ def fake_streams(monkeypatch):
 
 
 async def crash(bridge):
-    """Stops the bridge's tasks without its stop(): nothing drained, logs only closed."""
-    tasks = [*bridge.batch_tasks.values(), *bridge.wal_tasks.values()]
+    """Stops the bridge's tasks without its stop(): nothing drained, no OFFLINE, logs only closed."""
+    tasks = [*bridge.batch_tasks.values(), *bridge.wal_tasks.values(), *bridge.host_tasks.values()]
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)

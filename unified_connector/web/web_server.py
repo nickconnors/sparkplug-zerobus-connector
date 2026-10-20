@@ -135,6 +135,7 @@ class WebServer:
 
             # Monitoring
             web.get('/api/metrics', self.get_metrics),
+            web.get('/api/sparkplug/health', self.get_sparkplug_health),
             web.get('/api/status', self.get_status),
             web.get('/api/diagnostics/pipeline', self.get_pipeline_diagnostics),
 
@@ -737,6 +738,15 @@ class WebServer:
             return web.json_response(metrics)
         except Exception as e:
             logger.error(f"Failed to get metrics: {e}", exc_info=True)
+            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+
+    @require_permission(Permission.READ)
+    async def get_sparkplug_health(self, request: web.Request) -> web.Response:
+        """Per Sparkplug source: host state, MQTT, rows, Zerobus writer, NBIRTH calls and write-ahead log."""
+        try:
+            return web.json_response(self.bridge.sparkplug_health())
+        except Exception as e:
+            logger.error(f"Failed to get Sparkplug health: {e}", exc_info=True)
             return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
     @require_permission(Permission.READ)
