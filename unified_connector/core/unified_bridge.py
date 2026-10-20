@@ -20,7 +20,7 @@ import math
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from unified_connector.protocols.base import ProtocolClient, ProtocolRecord, ProtocolType
 from unified_connector.protocols.factory import create_protocol_client
@@ -82,6 +82,8 @@ class UnifiedBridge:
         self.config = config
         self.sources = config.get('sources', [])
         self._source_cfg_by_name: Dict[str, Dict[str, Any]] = {}
+        # each source's own numeric_compression, parsed once per change of the sources (not per record)
+        self._source_compression: Dict[str, Tuple[Optional[CompressionPolicy], List[CompressionRule]]] = {}
         self._refresh_source_lookup()
 
         # ZeroBus configuration
@@ -220,6 +222,18 @@ class UnifiedBridge:
             for s in self.sources
             if isinstance(s, dict) and s.get("name")
         }
+        self._source_compression = {}
+        for name, source_cfg in self._source_cfg_by_name.items():
+            src_comp_cfg = source_cfg.get("numeric_compression") or {}
+            self._source_compression[name] = (parse_policy_dict(src_comp_cfg) if src_comp_cfg else None,
+                                              parse_rules(src_comp_cfg) if src_comp_cfg else [])
+
+    def _forget_compression_state(self, source_name: str) -> None:
+        """A removed or changed source's tags start compression again (nothing kept from its old settings)."""
+        prefix = self._compression_key(source_name, "")
+        for states in (self.last_emitted_by_key, self.sdt_state_by_key):
+            for key in [k for k in states if k.startswith(prefix)]:
+                del states[key]
 
 
 
@@ -1005,10 +1019,7 @@ class UnifiedBridge:
             asyncio.create_task(self._enqueue_record(record_dict, queue))
 
     def _resolve_compression_policy_for_record(self, source_name: str, tag_path: str) -> CompressionPolicy:
-        source_cfg = self._source_cfg_by_name.get(source_name) or {}
-        src_comp_cfg = source_cfg.get("numeric_compression", {}) if isinstance(source_cfg, dict) else {}
-        src_policy = parse_policy_dict(src_comp_cfg) if src_comp_cfg else None
-        src_rules = parse_rules(src_comp_cfg) if src_comp_cfg else []
+        src_policy, src_rules = self._source_compression.get(source_name, (None, []))
         return resolve_effective_policy(
             self.global_compression_policy,
             self.global_compression_rules,
@@ -1032,8 +1043,10 @@ class UnifiedBridge:
         value = record_dict.get("value")
         last = self.last_emitted_by_key.get(key)
 
-        # Non-numeric values always use change-only semantics.
-        if not is_numeric(value):
+        # Non-numeric values, and NaN or infinity (no distance to measure), always use change-only semantics;
+        # the tag's SDT starts again at its next finite number.
+        if not is_numeric(value) or not math.isfinite(value):
+            self.sdt_state_by_key.pop(key, None)
             if not changed(last, value):
                 self.metrics['compression']['filtered_change_only'] += 1
                 return None
@@ -1583,6 +1596,7 @@ class UnifiedBridge:
         # Remove from sources list (in place: the web server lists the same list)
         self.sources[:] = [s for s in self.sources if s.get('name') != source_name]
         self._refresh_source_lookup()
+        self._forget_compression_state(source_name)
 
         logger.info(f"✓ Source '{source_name}' removed successfully")
 
@@ -1597,12 +1611,15 @@ class UnifiedBridge:
         self._source_queues.pop(source_name, None)
         old = self.sources[index]
         self.sources[index] = source_config
+        self._refresh_source_lookup()
+        self._forget_compression_state(source_name)
         if was_active and source_config.get('enabled', True):
             try:
                 await self._start_client(source_config)
             except Exception:
                 # runs on as before (the page shows the error, nothing is saved)
                 self.sources[index] = old
+                self._refresh_source_lookup()
                 self._source_queues.pop(source_name, None)
                 if old.get('enabled', True):
                     await self._start_client(old)

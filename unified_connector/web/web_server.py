@@ -710,6 +710,7 @@ class WebServer:
                 # Update bridge config view (without restarting running tasks)
                 self.bridge.config = self.config
                 self.bridge.sources = self.config.get('sources', [])
+                self.bridge._refresh_source_lookup()   # the sources' compression settings follow the new list
                 self.bridge.zerobus_config = self.config.get('zerobus', {}) or {}
                 self.bridge.zerobus_config_enabled = bool(self.bridge.zerobus_config.get('enabled', False))
                 self.bridge.batch_size = self.bridge.zerobus_config.get('batch', {}).get('max_records', 1000)

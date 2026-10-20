@@ -544,6 +544,14 @@ normalization:
 Compression is applied after normalization and before backpressure enqueue.
 Timestamp source for SDT decisions is the source `event_time_ms` (not ingest time).
 
+- **Sparkplug B sources aren't compressed:** each of their rows is a whole message (`sparkplug_raw`), not one
+  reading, so a `numeric_compression` block on a `sparkplug` source has no effect.
+- **NaN and infinite readings** use change-only semantics in every mode (a repeated NaN is no change); a tag's
+  SDT starts again at its next finite number.
+- **The write-ahead log** (`zerobus.wal`) holds only the rows compression passes. SDT keeps the point it hasn't
+  decided on yet in memory, so a stop or a crash loses that point.
+- **Changing or removing a source** (web page or REST API) starts its tags' compression again.
+
 ```yaml
 numeric_compression:
   mode: sdt            # none | change_only | deadband | sdt

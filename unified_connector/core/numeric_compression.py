@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -281,14 +282,20 @@ def changed(last: Any, current: Any) -> bool:
         return False
     if last is None or current is None:
         return True
+    if _is_nan(last) and _is_nan(current):
+        return False  # NaN != NaN, but a repeated NaN is no change
     return last != current
+
+
+def _is_nan(value: Any) -> bool:
+    return isinstance(value, float) and math.isnan(value)
 
 
 def meaningful_numeric_change(last: Any, current: Any, deadband: float) -> bool:
     a = as_float(last)
     b = as_float(current)
-    if a is None or b is None:
-        return changed(last, current)
+    if a is None or b is None or not (math.isfinite(a) and math.isfinite(b)):
+        return changed(last, current)  # NaN/infinity: no distance to compare with the deadband
     return abs(a - b) > max(0.0, deadband)
 
 
