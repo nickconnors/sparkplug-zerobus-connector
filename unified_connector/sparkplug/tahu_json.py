@@ -12,8 +12,7 @@
 # org.eclipse.tahu.json.FileSerializer and org.eclipse.tahu.util.PayloadUtil.decompress.
 """Sparkplug B payload bytes -> JSON identical to Eclipse Tahu's ``PayloadUtil.toJsonString``.
 
-This is the JSON the
-connector writes to ``sparkplug_raw.msg``. Tahu's behaviour is copied as is, including its quirks
+This is the JSON the connector writes to ``sparkplug_raw.msg``. Tahu's behaviour is copied as is, including its quirks
 (each marked ``Tahu quirk``); the one deliberate difference is marked ``Deviation``.
 
     to_tahu_json(payload: bytes) -> str     # raises on a payload Tahu can't decode or serialize

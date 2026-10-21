@@ -95,7 +95,7 @@ def test_state_and_foreign_topics_get_no_row():
 
 
 def test_commands_get_no_row():
-    # births, deaths and data are stored, NCMD/DCMD aren't
+    # births, deaths and data are stored, commands (NCMD/DCMD) aren't
     p = fixture("ddata-1.bin")
     assert convert("spBv1.0/Plant1/NCMD/Line A", p, AT).row is None
     assert convert("spBv1.0/Plant1/DCMD/Line A/M100", p, AT).row is None
@@ -108,13 +108,13 @@ def test_commands_get_no_row():
 @pytest.mark.parametrize("topic", ["spBv1.0/Plant1/DDATA/Line A", "spBv1.0/Plant1/NDATA/Line A/M100",
                                    "spBv1.0/Plant1/FOO/Line A", "spBv1.0/Plant1//Line A", "spBv1.0/Plant1"])
 def test_malformed_sparkplug_topic_gets_no_row(topic):
-    # a malformed topic: nothing stored
+    # counted and logged, nothing stored
     o = convert(topic, b"", AT)
     assert o.row is None and o.skip is Skip.MALFORMED_TOPIC and o.detail
 
 
 def test_undecodable_payload_gets_no_row():
-    # an undecodable payload: nothing stored
+    # counted and logged, nothing stored
     o = convert("spBv1.0/Plant1/DDATA/Line A/M100", b"\xff\x01", AT)
     assert o.row is None and o.skip is Skip.UNDECODABLE_PAYLOAD and "2 bytes" in o.detail
 

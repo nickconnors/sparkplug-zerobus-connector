@@ -4,7 +4,8 @@ A `sparkplug` source connects the connector to an MQTT server that carries **Spa
 Ignition with MQTT Transmission publishing to a Chariot MQTT server, or any other
 Sparkplug 3.0 edge) and writes **one row per Sparkplug message** to a Delta table through Zerobus.
 
-- **One row per message**: `msg` holds the payload as Eclipse Tahu's JSON, byte for byte.
+- **One row per message**: the `sparkplug_raw` table below, `msg` holding the payload as Eclipse Tahu's
+  JSON, byte for byte what Java Tahu produces; splitting it into metrics is left to SQL.
 - **Sparkplug primary host application**: with `primary_host_id` set, the edges buffer their data
   (store and forward) whenever the rows can't reach Databricks, and send it once they can again.
 - **Confirmed writes**: a row leaves the connector only once Zerobus has acknowledged it; an optional

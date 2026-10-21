@@ -2,7 +2,7 @@
 
 The columns of ``sparkplug_raw``: ``msg_id``,
 ``msg_topic``, ``namespace``, ``group_id``, ``message_type``, ``edge_node_id``, ``device_id``, ``msg``
-(VARIANT: the payload as Tahu JSON, ``to_tahu_json``) and ``inserted_at`` (NUMBER: epoch ms at receipt).
+(VARIANT: the payload as Tahu JSON, ``to_tahu_json``) and ``inserted_at`` (DECIMAL(38,0): epoch ms at receipt).
 
 Stored: births, deaths and data of
 edge nodes and devices. Skipped: host STATE, other namespaces, commands (NCMD, DCMD),
@@ -91,7 +91,7 @@ class RawRow:
     inserted_at: int
 
     def to_zerobus_record(self) -> dict[str, str | None]:
-        """The row as a Zerobus JSON record, in the column order. ``msg`` (VARIANT) goes as its
+        """The row as a Zerobus JSON record, in the table's column order. ``msg`` (VARIANT) goes as its
         JSON text and ``inserted_at`` (DECIMAL(38,0)) as a string of digits: Zerobus rejects an object
         for a VARIANT and a JSON number for a DECIMAL."""
         return {

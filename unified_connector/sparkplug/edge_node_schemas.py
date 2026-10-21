@@ -1,4 +1,4 @@
-"""What happens when an NBIRTH arrives (``BirthNotifier`` and ``DatabricksSql``):
+"""What the connector does when an NBIRTH arrives (``BirthNotifier`` and ``DatabricksSql``):
 ``CALL <node schema>.create_edge_node_schema(prefix, group, edge node, false)``, which
 (re)builds the edge node's per-model views from its latest NBIRTH. The procedures are configurable
 (``edge_node_schemas.procedures``, ``catalog.schema.procedure``); each is called with those four arguments.
