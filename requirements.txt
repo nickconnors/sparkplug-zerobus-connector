@@ -1,7 +1,6 @@
 aiohttp==3.9.5
 aiohttp-cors==0.7.0
 httpx>=0.25.0
-prometheus-client==0.20.0
 PyYAML==6.0.2
 databricks-zerobus-ingest-sdk==1.10.0
 databricks-sdk>=0.20.0

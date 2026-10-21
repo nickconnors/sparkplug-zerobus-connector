@@ -29,7 +29,7 @@ Enterprise-grade connector for streaming OT/IoT data from industrial protocols (
 - **Backpressure Management**: Memory queue + disk spooling + DLQ, per target table
 - **Write-Ahead Log** (`zerobus.wal`, optional): rows on disk until ZeroBus acknowledged them, replayed after a crash
 - **Auto-Reconnection**: Protocol clients automatically reconnect on failure
-- **Health Monitoring**: Prometheus metrics, health check endpoints
+- **Health Monitoring**: `GET /health` on the web UI's port (the Docker image's health check), metrics as JSON (`GET /api/metrics`, `GET /api/sparkplug/health`)
 - **Circuit Breaker**: Protects ZeroBus from overload
 
 ### Management
@@ -727,7 +727,7 @@ curl http://localhost:8080/api/discovery/servers
    - Tune batch size based on network latency
    - Adjust backpressure queue size for bursty data
    - Enable disk spooling for resilience
-   - Monitor Prometheus metrics
+   - Watch `GET /api/metrics` (queue depth, dropped and written records per target)
 
 3. **Reliability:**
    - Use Docker restart policies

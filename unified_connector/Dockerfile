@@ -73,14 +73,12 @@ ENV PYTHONUNBUFFERED=1 \
     CONNECTOR_LOG_LEVEL=INFO \
     CONNECTOR_DATA_DIR=/data
 
-# Expose ports
-EXPOSE 8080
-EXPOSE 8081
-EXPOSE 9090
+# Expose the web UI's port (web_ui.port in the config)
+EXPOSE 8001
 
-# Health check
+# Health check: GET /health on the web UI's port (CONNECTOR_HEALTH_PORT if it isn't 8001)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8081/health || exit 1
+    CMD curl -f "http://localhost:${CONNECTOR_HEALTH_PORT:-8001}/health" || exit 1
 
 # Run connector
 CMD ["python", "-m", "unified_connector"]

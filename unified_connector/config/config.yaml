@@ -251,17 +251,6 @@ credentials:
   storage:
     type: encrypted
     file: ~/.unified_connector/credentials.enc
-monitoring:
-  health_check:
-    enabled: true
-    port: 8081
-  prometheus:
-    enabled: true
-    port: 9090
-    path: /metrics
-  stats:
-    enabled: true
-    update_interval_seconds: 10
 performance:
   max_concurrent_connections: 100
   connection_pool_size: 20

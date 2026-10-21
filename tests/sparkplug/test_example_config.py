@@ -60,6 +60,7 @@ def test_the_example_has_one_source_per_protocol_all_off_and_no_workspace_values
     assert zerobus["zerobus_endpoint"] == "${env:ZEROBUS_ENDPOINT}"
     assert zerobus["workspace_host"] == zerobus["default_target"]["workspace_host"] == "${env:DATABRICKS_HOST}"
     assert zerobus["auth"] == {"client_id": "${env:DATABRICKS_CLIENT_ID}", "client_secret": "${env:DATABRICKS_CLIENT_SECRET}"}
+    assert "monitoring" not in config     # its health_check/prometheus ports were never served
     hosts = re.findall(r"[\w<>.-]+\.cloud\.databricks\.com", EXAMPLE.read_text())
     assert hosts and all("<" in h for h in hosts), hosts   # placeholders only, no real workspace
 
