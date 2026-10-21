@@ -551,6 +551,8 @@ Timestamp source for SDT decisions is the source `event_time_ms` (not ingest tim
 - **The write-ahead log** (`zerobus.wal`) holds only the rows compression passes. SDT keeps the point it hasn't
   decided on yet in memory, so a stop or a crash loses that point.
 - **Changing or removing a source** (web page or REST API) starts its tags' compression again.
+- **Each tag is compressed on its own**, by the source's path for it (`topic_or_path`): normalization may give
+  several tags one `tag_path`. A rule's `tag_path_regex` matches either the normalized `tag_path` or that path.
 
 ```yaml
 numeric_compression:

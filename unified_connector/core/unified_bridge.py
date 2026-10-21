@@ -1018,7 +1018,8 @@ class UnifiedBridge:
             # Slow-path: fall back to async enqueue (disk spooling / drop policy)
             asyncio.create_task(self._enqueue_record(record_dict, queue))
 
-    def _resolve_compression_policy_for_record(self, source_name: str, tag_path: str) -> CompressionPolicy:
+    def _resolve_compression_policy_for_record(self, source_name: str, tag_path: str,
+                                               raw_path: Optional[str] = None) -> CompressionPolicy:
         src_policy, src_rules = self._source_compression.get(source_name, (None, []))
         return resolve_effective_policy(
             self.global_compression_policy,
@@ -1026,18 +1027,22 @@ class UnifiedBridge:
             src_policy,
             src_rules,
             tag_path,
+            raw_path,
         )
 
-    def _compression_key(self, source_name: str, tag_path: str) -> str:
-        # Normalized key first; source-scoped to avoid accidental cross-source coupling.
-        return f"{source_name}::{tag_path}"
+    def _compression_key(self, source_name: str, path: str) -> str:
+        # The source's own path (unique per tag), source-scoped to avoid accidental cross-source coupling.
+        return f"{source_name}::{path}"
 
     def _apply_numeric_compression(self, record: ProtocolRecord, record_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         source_name = str(record_dict.get("source_name") or record.source_name or "")
-        tag_path = str(record_dict.get("tag_path") or record_dict.get("topic_or_path") or "")
-        key = self._compression_key(source_name, tag_path)
+        raw_path = str(record_dict.get("topic_or_path") or "")
+        tag_path = str(record_dict.get("tag_path") or raw_path)
+        # Keyed by the source's own path, not tag_path: normalization may give several tags one tag_path (e.g.
+        # its "<site>/<protocol>" fallback), and their readings must not be compared with each other.
+        key = self._compression_key(source_name, raw_path or tag_path)
         event_time_ms = int(record.event_time_ms)
-        policy = self._resolve_compression_policy_for_record(source_name, tag_path)
+        policy = self._resolve_compression_policy_for_record(source_name, tag_path, raw_path)
         self.metrics['compression']['incoming'] += 1
 
         value = record_dict.get("value")

@@ -239,7 +239,13 @@ def resolve_effective_policy(
     source_policy: Optional[CompressionPolicy],
     source_rules: Optional[List[CompressionRule]],
     tag_path: str,
+    raw_path: Optional[str] = None,
 ) -> CompressionPolicy:
+    """A rule applies when it matches the normalized tag_path or the source's own path (raw_path): normalization
+    may leave the tag's name out of tag_path (e.g. its "<site>/<protocol>" fallback)."""
+    def matches(r: CompressionRule) -> bool:
+        return r.matches(tag_path) or (raw_path is not None and raw_path != tag_path and r.matches(raw_path))
+
     # Merge source over global first.
     p = CompressionPolicy(
         mode=source_policy.mode if source_policy is not None else global_policy.mode,
@@ -252,11 +258,11 @@ def resolve_effective_policy(
 
     # Rule precedence: source rules first, then global rules.
     for r in (source_rules or []):
-        if r.matches(tag_path):
+        if matches(r):
             return apply_rule(p, r)
 
     for r in global_rules:
-        if r.matches(tag_path):
+        if matches(r):
             return apply_rule(p, r)
 
     return p

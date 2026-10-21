@@ -139,3 +139,36 @@ async def test_filtered_rows_never_enter_the_write_ahead_log(monkeypatch, tmp_pa
     assert status.rows_appended == 2
     metrics = bridge.get_metrics()["bridge"]["compression"]
     assert (metrics["incoming"], metrics["emitted"], metrics["filtered_change_only"]) == (5, 2, 3)
+
+
+SIMULATOR = "IndustrialSensors/IndustrialSensors/Renewable Energy/solar_tracker_1_"   # the OPC-UA simulator's paths
+
+
+def normalized(compression) -> unified_bridge.UnifiedBridge:
+    cfg = config([OPCUA], compression)
+    cfg["normalization"] = {"enabled": True}
+    return unified_bridge.UnifiedBridge(cfg)
+
+
+def feed_tags(bridge, readings) -> list:
+    for i, (tag, value) in enumerate(readings):
+        bridge._on_record(reading(value, i, path=SIMULATOR + tag), "o")
+    q = bridge._queue_for_source("o").memory_queue
+    return [q.get_nowait() for _ in range(q.qsize())]
+
+
+def test_tags_normalized_to_one_tag_path_are_compressed_apart():
+    """Before: normalization gave every simulator tag the tag_path "unknown_site/opcua", the compression key,
+    so one tag's reading was compared with another's (live: SDT reset on nearly every reading)."""
+    out = feed_tags(normalized({"mode": "change_only"}),
+                    [("azimuth", 1.0), ("elevation", 1.0), ("azimuth", 1.0), ("elevation", 2.0)])
+    assert len({r["tag_path"] for r in out}) == 1                    # the case: one tag_path for both tags
+    assert [(r["topic_or_path"].rsplit("_", 1)[1], r["value"]) for r in out] == [
+        ("azimuth", 1.0), ("elevation", 1.0), ("elevation", 2.0)]
+
+
+def test_a_rule_matches_the_sources_own_path_when_tag_path_lacks_the_tag_name():
+    bridge = normalized({"mode": "none", "rules": [{"tag_path_regex": ".*azimuth.*", "mode": "change_only"}]})
+    out = feed_tags(bridge, [("azimuth", 1.0), ("azimuth", 1.0), ("elevation", 3.0), ("elevation", 3.0)])
+    assert [(r["topic_or_path"].rsplit("_", 1)[1], r["value"]) for r in out] == [
+        ("azimuth", 1.0), ("elevation", 3.0), ("elevation", 3.0)]
