@@ -407,9 +407,10 @@ async def test_the_log_is_only_for_tables_with_confirmed_writes(tmp_path, fake_s
     monkeypatch.setattr(unified_bridge, "ZeroBusClient", OriginalPath)
     cfg = bridge_config(tmp_path)
     cfg["zerobus"]["confirmed_writes"] = False
-    cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883", "enabled": False,
+    # enabled (a disabled source's table isn't opened); start_infra() starts no source
+    cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883", "enabled": True,
                        "target_table": "c.s.sparkplug_raw_2"},
-                      {"name": "m", "protocol": "mqtt", "endpoint": "mqtt://localhost:1883", "enabled": False}]
+                      {"name": "m", "protocol": "mqtt", "endpoint": "mqtt://localhost:1883", "enabled": True}]
     bridge = unified_bridge.UnifiedBridge(cfg)
     await bridge.start_infra()
     try:

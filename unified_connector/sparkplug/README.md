@@ -112,8 +112,8 @@ zerobus:
     table: sparkplug_raw
 ```
 
-`config/sparkplug.yaml` is a complete configuration driven by environment variables (its header lists
-them); the Docker image runs it by default. Run **exactly one** primary host per Primary Host ID: a second
+The package's `config/config.yaml` has this source as `sparkplug-example` (off): enable it and set its
+table, endpoint and credentials there (its header lists the environment variables). Run **exactly one** primary host per Primary Host ID: a second
 one with the same id fights over STATE, and two connectors with different ids write every row twice.
 
 ### The edge (MQTT Transmission)
@@ -191,13 +191,13 @@ doesn't show and unchanged fields stay as written there, `${env:...}` placeholde
 ## Docker
 
 ```
-docker build -f Dockerfile.sparkplug -t unified-ot-connector-sparkplug --build-arg PIP_INDEX_URL=<index> .
-docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8090:8090 \
-  -v connector-wal:/app/wal unified-ot-connector-sparkplug      # SPARKPLUG_WAL=true in connector.env
+docker build -f Dockerfile.connector -t unified-ot-zerobus --build-arg PIP_INDEX_URL=<index> .
+docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8001:8001 \
+  -v "$PWD/my-config.yaml:/app/my-config.yaml" -v connector-wal:/app/wal unified-ot-zerobus --config /app/my-config.yaml
 ```
 
 Python 3.12 with protobuf's upb implementation (~0.1 ms per typical DDATA, ~1 ms per 4.7 KB DBIRTH); runs
-`config/sparkplug.yaml` unless another `--config` is given. The image doesn't build the React page: build
+your copy of the config (`--config`; `zerobus.wal.enabled: true` for the write-ahead log in `/app/wal`). The image doesn't build the React page: build
 it in `webui/` first to include it.
 
 ## Limitations

@@ -415,7 +415,7 @@ zerobus:
 ```
 
 Its target table has the `sparkplug_raw` columns (DDL, grants, every setting:
-[sparkplug/README.md](sparkplug/README.md)); `config/sparkplug.yaml` is a complete, environment-driven example.
+[sparkplug/README.md](sparkplug/README.md)); `config/config.yaml` has a complete example source, `sparkplug-example` (off).
 
 ### Per-Source ZeroBus Targets
 

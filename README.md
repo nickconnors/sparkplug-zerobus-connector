@@ -241,11 +241,12 @@ A **`sparkplug`** source makes the connector a Sparkplug B host application on a
 - **Health**: `GET /api/sparkplug/health`; both web pages add, edit and show Sparkplug sources.
 
 ```bash
-docker build -f Dockerfile.sparkplug -t unified-ot-connector-sparkplug --build-arg PIP_INDEX_URL=<index> .
-docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8090:8090 unified-ot-connector-sparkplug
+docker build -f Dockerfile.connector -t unified-ot-zerobus --build-arg PIP_INDEX_URL=<index> .
+docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8001:8001 \
+  -v "$PWD/my-config.yaml:/app/my-config.yaml" -v connector-wal:/app/wal unified-ot-zerobus --config /app/my-config.yaml
 ```
 
-The image runs `config/sparkplug.yaml`, configured entirely by environment variables (its header lists them). Table DDL, grants, configuration, edge settings and behaviour: [unified_connector/sparkplug/README.md](unified_connector/sparkplug/README.md).
+`my-config.yaml` is a copy of `unified_connector/config/config.yaml` with the `sparkplug-example` source enabled (and its table and endpoint set); the connection settings and secrets come from environment variables (the config's header lists them). Table DDL, grants, configuration, edge settings and behaviour: [unified_connector/sparkplug/README.md](unified_connector/sparkplug/README.md).
 
 ---
 
@@ -336,7 +337,7 @@ Sparkplug B source (unified_connector/protocols/sparkplug_client.py, unified_con
 
 - Main config: `unified_connector/config/config.yaml` (or any file passed with `--config`)
 - Normalization config: `unified_connector/config/normalization_config.yaml`
-- Sparkplug B: `config/sparkplug.yaml` (everything from environment variables; see [unified_connector/sparkplug/README.md](unified_connector/sparkplug/README.md))
+- Every protocol, Sparkplug B included, in that one file: an example source per protocol, all off (see [unified_connector/sparkplug/README.md](unified_connector/sparkplug/README.md) for Sparkplug B)
 
 **Security note**: do not commit ZeroBus secrets. Configure credentials via the UI, env vars, or local credential store.
 
@@ -1079,7 +1080,6 @@ zerobus:
 - **docs/SECURITY_TESTING.md** - Security testing framework
 
 ### Configuration Examples
-- **config/sparkplug.yaml** - A Sparkplug B source writing to Databricks (environment-driven; the Docker image's default)
 - **config/incident_playbooks.yml** - Incident response playbooks (900 lines)
 - **config/siem/alert_rules.yml** - SIEM alert rules
 

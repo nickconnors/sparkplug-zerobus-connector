@@ -319,8 +319,11 @@ class UnifiedBridge:
             target_id = self._get_target_id(merged_target)
             targets[target_id] = merged_target
 
-        # The sources' own target tables
+        # The enabled sources' own target tables (a disabled source's table is made when it is enabled and
+        # started: _ensure_target; until then nothing is opened for it, e.g. the example config's sources)
         for source in self.sources:
+            if not source.get('enabled', True):
+                continue
             try:
                 target_config = source_tables.target_config(source, self.zerobus_config)
             except ValueError as e:
@@ -336,9 +339,10 @@ class UnifiedBridge:
 
     def _confirmed(self, target_id: str) -> bool:
         """Confirmed writes for this table: it gets Sparkplug rows (they need them: the primary host, the NBIRTH
-        call), or zerobus.confirmed_writes is on."""
+        call), or zerobus.confirmed_writes is on. Disabled sources don't count."""
         return self.confirmed_writes or any(
-            source_tables.is_sparkplug(s) and self._get_target_for_source(s.get('name')) == target_id for s in self.sources)
+            source_tables.is_sparkplug(s) and s.get('enabled', True) and self._get_target_for_source(s.get('name')) == target_id
+            for s in self.sources)
 
     async def _create_target(self, target_id: str, target_config: Dict[str, Any]) -> None:
         """The table's ZeroBus client, and its ConfirmedWriter (with its write-ahead log) if _confirmed."""

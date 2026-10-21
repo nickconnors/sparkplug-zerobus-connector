@@ -1,3 +1,13 @@
+# The connector's configuration: one file for every protocol. Copy it, then:
+#   1. Set the environment variables it reads: ZEROBUS_ENDPOINT (<workspace-id>.zerobus.<region>.cloud.databricks.com),
+#      DATABRICKS_HOST (https://<workspace>.cloud.databricks.com), DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET
+#      (a service principal with USE CATALOG, USE SCHEMA, MODIFY and SELECT on the target tables), and the
+#      passwords of the sources you use. Never write a secret into this file.
+#   2. Under sources:, set enabled: true on the example sources you need (all are off) and fill in your
+#      endpoints, or delete the others; add more sources of any protocol the same way.
+#   3. Set zerobus.default_target to your table (and a source's target_table for a table of its own).
+# Run: python -m unified_connector --config <your copy>. The web page's source and ZeroBus edits are saved
+# back into the file it was started with, placeholders kept.
 connector:
   name: Unified OT Zerobus Connector Client
   log_level: INFO
@@ -17,7 +27,7 @@ web_ui:
       provider: databricks
       client_id: ''
       client_secret: ''
-      workspace_host: https://e2-demo-field-eng.cloud.databricks.com
+      workspace_host: '${env:DATABRICKS_HOST:}'
       redirect_uri: http://localhost:8082/login/callback
       scopes:
       - all-apis
@@ -103,10 +113,11 @@ discovery:
     alt_tcp_port: 5020
     timeout_sec: 2.0
 sources:
-- name: ot-simulator-opcua
+# OPC-UA: polls (or subscribes to) the server's variables; here with its own numeric compression
+- name: opcua-example
   protocol: opcua
+  enabled: false
   endpoint: opc.tcp://127.0.0.1:4841/ot-simulator/server/
-  enabled: true
   security_mode: None
   normalization_enabled: true
   subscription_mode: false
@@ -118,25 +129,38 @@ sources:
     change_only: true
     sdt_deviation: 0.15
     sdt_max_interval_ms: 300000
-- name: modbus-127-0-0-1-5020
-  protocol: modbus
-  endpoint: modbus://127.0.0.1:5020
-  enabled: false
-  normalization_enabled: true
-- name: mqtt-127-0-0-1-1883
+# MQTT: plain topics (for Sparkplug B topics use the sparkplug source below)
+- name: mqtt-example
   protocol: mqtt
-  endpoint: mqtt://127.0.0.1:1883
   enabled: false
+  endpoint: mqtt://127.0.0.1:1883
   normalization_enabled: true
   subscription_mode: true
-- name: opcua_127_0_0_1_4841
-  protocol: opcua
-  endpoint: opc.tcp://127.0.0.1:4841/ot-simulator/server/
-  enabled: true
-  site: ''
-  area: ''
-  line: ''
-  equipment: ''
+# Modbus TCP
+- name: modbus-example
+  protocol: modbus
+  enabled: false
+  endpoint: modbus://127.0.0.1:5020
+  normalization_enabled: true
+# Sparkplug B: one row per message in a table of its own (target_table; its columns differ from the other
+# protocols'), optionally the edges' primary host and a procedure call per NBIRTH (unified_connector/sparkplug/README.md)
+- name: sparkplug-example
+  protocol: sparkplug
+  enabled: false
+  endpoint: '${env:SPARKPLUG_MQTT_ENDPOINT:mqtt://localhost:1883}'
+  target_table: bridge_stage_db.stage_db.sparkplug_raw
+  client_id: databricks-sparkplug
+  username: '${env:SPARKPLUG_MQTT_USERNAME:}'
+  password: '${env:SPARKPLUG_MQTT_PASSWORD:}'
+  primary_host_id: ''              # the edges' Primary Host ID, e.g. databricks-zerobus; empty: not a primary host
+  state_format: v3
+  offline_after_seconds: 30
+  online_after_seconds: 30
+  edge_node_schemas:
+    enabled: false
+    warehouse_id: ''
+    procedures: [bridge_node_db.stage_db.create_edge_node_schema]
+    schema_prefix: nb
 normalization:
   enabled: true
   path_template: '{site}/{area}/{line}/{equipment}/{signal_type}/{tag_name}'
@@ -174,16 +198,23 @@ normalization:
       - 4
 zerobus:
   enabled: true
-  workspace_host: https://e2-demo-field-eng.cloud.databricks.com
-  zerobus_endpoint: 1444828305810485.zerobus.us-west-2.cloud.databricks.com
-  default_target:
-    workspace_host: https://e2-demo-field-eng.cloud.databricks.com
+  workspace_host: '${env:DATABRICKS_HOST}'
+  zerobus_endpoint: '${env:ZEROBUS_ENDPOINT}'
+  default_target:                  # the table of every source without a target_table of its own
+    workspace_host: '${env:DATABRICKS_HOST}'
     catalog: opcua
     schema: scada_data
     table: opcua_events_bronze
   auth:
-    client_id: ${credential:zerobus.client_id}
-    client_secret: ${credential:zerobus.client_secret}
+    # or the encrypted credential store: ${credential:zerobus.client_id} / ${credential:zerobus.client_secret}
+    # (python -m unified_connector.core.credential_manager store ...)
+    client_id: '${env:DATABRICKS_CLIENT_ID}'
+    client_secret: '${env:DATABRICKS_CLIENT_SECRET}'
+  confirmed_writes: false          # true: every table's batches are kept until Zerobus acknowledges them
+                                   # (a table with Sparkplug rows always has them)
+  wal:                             # a write-ahead log for the confirmed-writes tables (rows survive a crash)
+    enabled: false
+    path: wal
   batch:
     max_records: 1000
     timeout_seconds: 5.0

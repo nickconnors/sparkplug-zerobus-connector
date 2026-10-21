@@ -1,0 +1,21 @@
+# The connector: OPC-UA, MQTT, Modbus and Sparkplug B to Databricks through Zerobus (no React web UI build:
+# build it in webui/ first to include it; protobuf runs its fast upb implementation).
+#
+#   docker build -f Dockerfile.connector -t unified-ot-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
+#   docker run --env-file connector.env -p 127.0.0.1:8001:8001 -v "$PWD/my-config.yaml:/app/my-config.yaml" \
+#     -v connector-wal:/app/wal unified-ot-zerobus --config /app/my-config.yaml
+#
+# Without --config it runs unified_connector/config/config.yaml, whose example sources are all off: mount
+# your copy (sources enabled, tables set) and pass --config. connector.env holds the variables the config
+# reads (its header lists them). The write-ahead log (zerobus.wal) is in /app/wal: a volume keeps it.
+FROM python:3.12-slim
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt
+COPY unified_connector ./unified_connector
+RUN mkdir -p /app/wal && useradd --create-home connector && chown -R connector /app
+USER connector
+EXPOSE 8001
+ENTRYPOINT ["python", "-m", "unified_connector"]
