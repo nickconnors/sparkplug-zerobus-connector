@@ -21,11 +21,6 @@ export function ZeroBusPage() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
 
-  const [proxyEnabled, setProxyEnabled] = useState(false);
-  const [proxyUseEnv, setProxyUseEnv] = useState(true);
-  const [proxyHttp, setProxyHttp] = useState("");
-  const [proxyHttps, setProxyHttps] = useState("");
-  const [proxyNoProxy, setProxyNoProxy] = useState("localhost,127.0.0.1");
 
   function parseFqn(fqn: string): { catalog: string; schema: string; table: string } | null {
     const parts = (fqn || "")
@@ -56,12 +51,6 @@ export function ZeroBusPage() {
       setClientId(String(cfg?.auth?.client_id ?? ""));
       setClientSecret("");
 
-      const proxy: any = (cfg as any)?.proxy || {};
-      setProxyEnabled(Boolean(proxy?.enabled ?? false));
-      setProxyUseEnv(proxy?.use_env_vars !== false);
-      setProxyHttp(String(proxy?.http_proxy ?? ""));
-      setProxyHttps(String(proxy?.https_proxy ?? ""));
-      setProxyNoProxy(String(proxy?.no_proxy ?? "localhost,127.0.0.1"));
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Failed to load ZeroBus config", "bad");
     } finally {
@@ -91,13 +80,6 @@ export function ZeroBusPage() {
       auth: {
         client_id: clientId.trim(),
       },
-      proxy: {
-        enabled: proxyEnabled,
-        use_env_vars: proxyUseEnv,
-        http_proxy: proxyHttp.trim(),
-        https_proxy: proxyHttps.trim(),
-        no_proxy: proxyNoProxy.trim(),
-      },
     };
     if (clientSecret.trim()) payload.auth.client_secret = clientSecret.trim();
 
@@ -115,11 +97,6 @@ export function ZeroBusPage() {
     clientSecret,
     enabled,
     load,
-    proxyEnabled,
-    proxyHttp,
-    proxyHttps,
-    proxyNoProxy,
-    proxyUseEnv,
     tableFqn,
     toast,
     workspaceHost,
@@ -258,49 +235,6 @@ export function ZeroBusPage() {
             </div>
           </label>
 
-          <div className="section-title" style={{ marginTop: 8 }}>
-            Proxy Settings (for Purdue Layer 3.5)
-          </div>
-          <div className="muted" style={{ marginTop: -6 }}>
-            Configure proxy for outbound connections to Databricks cloud (Layer 4+). Leave blank to use environment variables.
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <label className="field">
-              <div className="field-label">Enable proxy</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={proxyEnabled}
-                  onChange={(e) => setProxyEnabled(e.target.checked)}
-                  style={{ width: 18, height: 18 }}
-                />
-                <span className="muted">Route cloud traffic through proxy</span>
-              </div>
-            </label>
-            <label className="field">
-              <div className="field-label">Use env vars</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={proxyUseEnv}
-                  onChange={(e) => setProxyUseEnv(e.target.checked)}
-                  style={{ width: 18, height: 18 }}
-                />
-                <span className="muted">Use HTTP_PROXY/HTTPS_PROXY</span>
-              </div>
-            </label>
-          </div>
-
-          <Field label="HTTP Proxy">
-            <TextInput value={proxyHttp} onChange={(e) => setProxyHttp(e.target.value)} placeholder="http://proxy.company.com:8080" />
-          </Field>
-          <Field label="HTTPS Proxy">
-            <TextInput value={proxyHttps} onChange={(e) => setProxyHttps(e.target.value)} placeholder="http://proxy.company.com:8080" />
-          </Field>
-          <Field label="No Proxy" hint="Comma-separated list of hosts to bypass proxy">
-            <TextInput value={proxyNoProxy} onChange={(e) => setProxyNoProxy(e.target.value)} placeholder="localhost,127.0.0.1,.internal" />
-          </Field>
         </div>
       </Panel>
 

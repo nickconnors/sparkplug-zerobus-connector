@@ -2,7 +2,6 @@
 Security Headers Tests
 
 Tests that all required security headers are present in responses.
-NIS2 Compliance: Article 21.2(a) - Security Policies
 """
 
 import pytest

@@ -16,7 +16,7 @@ from aiohttp import web
 import aiohttp_cors
 from typing import Callable
 
-# Authentication and authorization (NIS2 compliance)
+# Authentication and authorization (off by default)
 from unified_connector.web.auth import AuthenticationManager, auth_middleware
 from unified_connector.web.rbac import (
     require_permission, require_role, Permission, Role, get_role_info
@@ -24,10 +24,7 @@ from unified_connector.web.rbac import (
 from unified_connector.web.security_headers import (
     security_headers_middleware, log_security_headers_status
 )
-from unified_connector.web.input_validation import (
-    validate_source_config, validate_source_name, validate_protocol,
-    validate_host, validate_port, ValidationError
-)
+from unified_connector.web.input_validation import validate_source_config, validate_source_name, ValidationError
 from unified_connector.web.correlation_middleware import correlation_id_middleware
 from unified_connector.core.structured_logging import get_structured_logger
 from unified_connector.core.tls_manager import create_ssl_context_from_config
@@ -36,6 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 SECRET_KEY_PARTS = ('password', 'secret', 'token', 'private_key', 'api_key')
+
+NO_UI_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Sparkplug Zerobus connector</title></head>
+<body style="font-family: sans-serif; margin: 2em">
+<h1>Sparkplug Zerobus connector</h1>
+<p>The web UI isn't built into this copy: run <code>npm ci &amp;&amp; npm run build</code> in <code>webui/</code>
+(it builds into <code>unified_connector/web/static/connector-ui/</code>), then restart the connector.</p>
+<p>The API works without it: <a href="/health">/health</a>, <a href="/api/status">/api/status</a>,
+<a href="/api/sparkplug/health">/api/sparkplug/health</a>.</p>
+</body></html>
+"""
 
 
 def _masked(value: Any) -> Any:
@@ -105,24 +113,23 @@ class WebServer:
 
         static_dir = Path(__file__).parent / "static"
 
-        # Setup correlation ID tracking (NIS2 compliance - Article 21.2(b))
+        # Correlation IDs in the logs
         self.app.middlewares.append(correlation_id_middleware)
         logger.info("✓ Correlation ID tracking enabled")
 
-        # Setup security headers (NIS2 compliance - Article 21.2(a))
-        # Will be logged after TLS setup
+        # Security headers (logged after the TLS setup)
         self.app.middlewares.append(security_headers_middleware)
 
-        # Setup authentication (NIS2 compliance - Article 21.2(g))
+        # Login (web_ui.authentication)
         auth_config = self.config.get('web_ui', {}).get('authentication', {})
         if auth_config.get('enabled', False):
             self.auth_manager = AuthenticationManager(auth_config)
             await self.auth_manager.setup(self.app)
             # Add auth middleware
             self.app.middlewares.append(auth_middleware)
-            logger.info("✓ Authentication enabled (NIS2 compliant)")
+            logger.info("✓ Authentication enabled")
         else:
-            logger.warning("⚠️  Authentication disabled - NOT NIS2 compliant!")
+            logger.warning("⚠️  Authentication disabled: anyone who reaches the web UI can change the configuration")
 
         # Setup CORS
         cors = aiohttp_cors.setup(self.app, defaults={
@@ -136,7 +143,7 @@ class WebServer:
 
         # API Routes
         routes = [
-            # Authentication (NIS2 compliance)
+            # Authentication
             web.get('/login', self.handle_login),
             web.get('/login/callback', self.handle_oauth_callback),
             web.post('/logout', self.handle_logout),
@@ -171,8 +178,7 @@ class WebServer:
             # Health
             web.get('/health', self.health_check),
 
-            # Static files (Web UI)
-            web.get('/legacy', self.serve_legacy_index),
+            # Web UI
             web.get('/', self.serve_index),
         ]
 
@@ -184,19 +190,19 @@ class WebServer:
         if static_dir.exists():
             self.app.router.add_static('/static/', path=str(static_dir), name='static')
 
-        # Setup TLS/SSL (NIS2 compliance - Article 21.2(h))
+        # HTTPS (web_ui.tls)
         if self.tls_config.get('enabled', False):
             try:
                 self.ssl_context = create_ssl_context_from_config(self.tls_config)
                 # Store HSTS config in app for security headers middleware
                 self.app.hsts_config = self.tls_config.get('hsts', {})
-                logger.info("✓ TLS/SSL enabled (NIS2 compliant)")
+                logger.info("✓ TLS/SSL enabled")
             except Exception as e:
                 logger.error(f"Failed to setup TLS/SSL: {e}")
-                logger.warning("⚠️  Falling back to HTTP - NOT NIS2 compliant!")
+                logger.warning("⚠️  Falling back to HTTP")
                 self.ssl_context = None
         else:
-            logger.warning("⚠️  TLS/SSL disabled - NOT NIS2 compliant!")
+            logger.info("TLS/SSL disabled: the web UI is plain HTTP")
 
         # Log security headers status
         log_security_headers_status(https_enabled=self.ssl_context is not None)
@@ -240,7 +246,7 @@ class WebServer:
         try:
             data = await request.json()
 
-            # Validate and sanitize input (NIS2 compliance - prevent injection attacks)
+            # Validate and sanitize input
             try:
                 data = validate_source_config(data)
             except ValidationError as e:
@@ -330,7 +336,7 @@ class WebServer:
                 return web.json_response({'status': 'error', 'message': f"Source not found: {source_name}"}, status=404)
             edited = _edited(current, current, data)
             conflicts = self.bridge.target_errors([edited if s is current else s for s in self.bridge.sources])
-            if conflicts:   # Sparkplug rows and other rows can't share a table (core/targets.py)
+            if conflicts:   # a target_table that isn't catalog.schema.table (core/targets.py)
                 return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
             await self.bridge.update_source(source_name, edited)
 
@@ -621,11 +627,8 @@ class WebServer:
                 # Update bridge config view (without restarting running tasks)
                 self.bridge.config = self.config
                 self.bridge.sources = self.config.get('sources', [])
-                self.bridge._refresh_source_lookup()   # the sources' compression settings follow the new list
                 self.bridge.zerobus_config = self.config.get('zerobus', {}) or {}
                 self.bridge.zerobus_config_enabled = bool(self.bridge.zerobus_config.get('enabled', False))
-                self.bridge.batch_size = self.bridge.zerobus_config.get('batch', {}).get('max_records', 1000)
-                self.bridge.batch_timeout_sec = self.bridge.zerobus_config.get('batch', {}).get('timeout_seconds', 5.0)
             except Exception:
                 pass
 
@@ -720,393 +723,6 @@ class WebServer:
         """Health check endpoint."""
         return web.json_response({'status': 'healthy'})
 
-    def _legacy_index_html(self) -> str:
-        # NOTE: Keep legacy HTML intact for parity/fallback at /legacy.
-        return """
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Unified OT Zerobus Connector Client</title>
-  <link rel="stylesheet" href="/static/style.css" />
-</head>
-<body>
-  <div class="container">
-    <div class="topbar">
-      <div class="title">
-        <h1>Unified OT Zerobus Connector Client</h1>
-      </div>
-    </div>
-
-    <div class="grid">
-      <div class="card collapsible" style="grid-column: 1 / -1">
-        <div class="card-header">
-          <h2>Overview</h2>
-          <div class="hint">High-level health + refresh</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#overviewBody" aria-label="Toggle Overview">▾</button>
-        </div>
-        <div id="overviewBody" class="card-body" style="display:none">
-          <div class="pillrow">
-            <div id="badgeDiscovery" class="pill warn"><strong>Discovery: unknown</strong></div>
-            <div id="badgeSources" class="pill warn"><strong>Sources: unknown</strong></div>
-            <div id="badgeZerobus" class="pill warn"><strong>ZeroBus: unknown</strong></div>
-            <button id="btnRefresh" class="btn btn-secondary" type="button">Refresh all</button>
-          </div>
-        </div>
-      </div>
-      <div class="card collapsible" style="grid-column: 1 / -1">
-        <div class="card-header">
-          <h2>Discovery</h2>
-          <div class="hint">Scan and test protocol servers</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#discoveryBody" aria-label="Toggle Discovery">▾</button>
-        </div>
-        <div id="discoveryBody" class="card-body" style="display:none">
-          <div class="row" style="justify-content:flex-end">
-            <button id="btnDiscoveryScan" class="btn btn-primary" type="button">Scan</button>
-          </div>
-          <div class="discovery-rows">
-            <div class="discovery-row">
-              <div class="row" style="justify-content: space-between; align-items: baseline">
-                <div class="section-title" style="margin: 0">OPC-UA</div>
-                <div id="discoveryCountOpcua" class="muted">—</div>
-              </div>
-              <table class="table table-compact" style="margin-top: 8px">
-                <thead>
-                  <tr>
-                    <th>Host</th>
-                    <th>Port</th>
-                    <th>Endpoint</th>
-                    <th>Reachable</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="discoveryTbodyOpcua"></tbody>
-              </table>
-            </div>
-
-            <div class="discovery-row">
-              <div class="row" style="justify-content: space-between; align-items: baseline">
-                <div class="section-title" style="margin: 0">MQTT</div>
-                <div id="discoveryCountMqtt" class="muted">—</div>
-              </div>
-              <table class="table table-compact" style="margin-top: 8px">
-                <thead>
-                  <tr>
-                    <th>Host</th>
-                    <th>Port</th>
-                    <th>Endpoint</th>
-                    <th>Reachable</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="discoveryTbodyMqtt"></tbody>
-              </table>
-            </div>
-
-            <div class="discovery-row">
-              <div class="row" style="justify-content: space-between; align-items: baseline">
-                <div class="section-title" style="margin: 0">Modbus</div>
-                <div id="discoveryCountModbus" class="muted">—</div>
-              </div>
-              <table class="table table-compact" style="margin-top: 8px">
-                <thead>
-                  <tr>
-                    <th>Host</th>
-                    <th>Port</th>
-                    <th>Endpoint</th>
-                    <th>Reachable</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="discoveryTbodyModbus"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="section-title">Discovery test result</div>
-          <div id="discoveryTestResult" class="codebox">Click “Test” on a discovered endpoint to see detailed diagnostics here.</div>
-        </div>
-      </div>
-
-      <!-- ZeroBus full width for better editing experience -->
-      <div class="card collapsible" style="grid-column: 1 / -1">
-        <div class="card-header">
-          <h2>ZeroBus</h2>
-          <div class="hint">ZeroBus configuration</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#zerobusBody" aria-label="Toggle ZeroBus">▾</button>
-        </div>
-        <div id="zerobusBody" class="card-body" style="display:none">
-          <div class="zerobus-fields split">
-            <label class="full">
-              Workspace host
-              <input id="zbWorkspace" placeholder="https://adb-..." />
-            </label>
-            <label class="full">
-              ZeroBus endpoint
-              <input id="zbZerobusEndpoint" placeholder="<workspaceId>.zerobus.<region>.cloud.databricks.com" />
-            </label>
-
-            <label class="full">
-              Target table (catalog.schema.table)
-              <input id="zbTableFqn" placeholder="main.iot_data.sensor_readings" />
-            </label>
-
-            <label>
-              Client ID
-              <input id="zbClientId" placeholder="<oauth-client-id>" />
-            </label>
-            <label>
-              Client secret
-              <input id="zbClientSecret" type="password" placeholder="(leave blank to keep existing)" />
-              <div id="zbSecretHint" class="muted" style="margin-top:6px"></div>
-            </label>
-
-            <label>
-              Enabled
-              <div class="row" style="gap:8px">
-                <input id="zbEnabled" type="checkbox" style="width:18px;height:18px" />
-                <span class="muted">Allow streaming when started</span>
-              </div>
-            </label>
-          </div>
-
-          <div class="section-title" style="margin-top: 20px">Proxy Settings (for Purdue Layer 3.5)</div>
-          <div class="muted" style="margin-bottom: 12px">Configure proxy for outbound connections to Databricks cloud (Layer 4+). Leave blank to use environment variables.</div>
-          <div class="zerobus-fields split">
-            <label>
-              Enable Proxy
-              <div class="row" style="gap:8px">
-                <input id="zbProxyEnabled" type="checkbox" style="width:18px;height:18px" />
-                <span class="muted">Route cloud traffic through proxy</span>
-              </div>
-            </label>
-
-            <label>
-              Use Environment Variables
-              <div class="row" style="gap:8px">
-                <input id="zbProxyUseEnv" type="checkbox" style="width:18px;height:18px" checked />
-                <span class="muted">Use HTTP_PROXY/HTTPS_PROXY env vars</span>
-              </div>
-            </label>
-
-            <label class="full">
-              HTTP Proxy
-              <input id="zbProxyHttp" placeholder="http://proxy.company.com:8080" />
-            </label>
-
-            <label class="full">
-              HTTPS Proxy
-              <input id="zbProxyHttps" placeholder="http://proxy.company.com:8080" />
-            </label>
-
-            <label class="full">
-              No Proxy
-              <input id="zbProxyNoProxy" placeholder="localhost,127.0.0.1,.internal" />
-              <div class="muted" style="margin-top:6px">Comma-separated list of hosts to bypass proxy</div>
-            </label>
-
-            <div class="row" style="grid-column: 1 / -1; margin-top: 6px">
-              <button id="btnLoadZerobus" class="btn btn-secondary" type="button">Reload</button>
-              <button id="btnSaveZerobus" class="btn btn-primary" type="button">Save</button>
-              <button id="btnStartZerobus" class="btn btn-good" type="button">Start</button>
-              <button id="btnStopZerobus" class="btn btn-warning" type="button">Stop</button>
-              <button id="btnZerobusDiag" class="btn btn-secondary" type="button">Diagnostics</button>
-            </div>
-          </div>
-
-          <div class="section-title">ZeroBus diagnostics</div>
-          <div id="zbDiag" class="codebox">Click "Diagnostics" to run checks.</div>
-</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card collapsible" style="grid-column: 1 / -1"> 
-        <div class="card-header">
-          <h2>Sources</h2>
-          <div class="hint">Add/edit/delete connector sources</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#sourcesBody" aria-label="Toggle Sources">▾</button>
-        </div>
-        <div id="sourcesBody" class="card-body" style="display:none">
-          <div class="row" style="justify-content:flex-end; gap:8px">
-            <button id="btnStartBridge" class="btn btn-secondary" type="button">Start bridge</button>
-            <button id="btnStartSelected" class="btn btn-good" type="button">Start selected</button>
-            <button id="btnStopSelected" class="btn btn-warning" type="button">Stop selected</button>
-          </div>
-          <div class="split">
-            <form id="sourceForm">
-              <input id="srcMode" type="hidden" value="create" />
-              <input id="srcOriginalName" type="hidden" value="" />
-
-              <div class="split">
-                <label>Name <input id="srcName" placeholder="plant_opcua_server" required /></label>
-                <label>
-                  Protocol
-                  <select id="srcProtocol">
-                    <option value="opcua">OPC-UA</option>
-                    <option value="mqtt">MQTT</option>
-                    <option value="modbus">Modbus</option>
-                    <option value="sparkplug">MQTT (Sparkplug)</option>
-                  </select>
-                </label>
-              </div>
-
-              <label>Endpoint <input id="srcEndpoint" placeholder="opc.tcp://192.168.1.100:4840" required /></label>
-              <label>Target table <input id="srcTargetTable" placeholder="catalog.schema.table (empty: the ZeroBus default table)" /></label>
-
-              <div id="srcSparkplugFields" style="display:none">
-                <div class="split">
-                  <label>Client ID <input id="srcSpClientId" placeholder="databricks-sparkplug" /></label>
-                  <label>Primary host ID <input id="srcSpPrimaryHostId" placeholder="empty: not a primary host" /></label>
-                </div>
-                <div class="split">
-                  <label>
-                    STATE format
-                    <select id="srcSpStateFormat">
-                      <option value="v3">v3 (spBv1.0/STATE)</option>
-                      <option value="v2">v2 (STATE, legacy)</option>
-                    </select>
-                  </label>
-                  <label>Offline after (s) <input id="srcSpOfflineAfter" type="number" min="1" placeholder="30" /></label>
-                </div>
-                <div class="split">
-                  <label>Online after (s) <input id="srcSpOnlineAfter" type="number" min="1" placeholder="30" /></label>
-                  <label>
-                    <span>Procedure on NBIRTH</span>
-                    <div class="row" style="gap:8px">
-                      <input id="srcSpEnsEnabled" type="checkbox" style="width:18px;height:18px" />
-                      <span class="muted">Call it after each edge node birth</span>
-                    </div>
-                  </label>
-                </div>
-                <div class="split">
-                  <label>SQL warehouse ID <input id="srcSpEnsWarehouse" placeholder="warehouse id" /></label>
-                  <label>Schema prefix <input id="srcSpEnsPrefix" placeholder="nb" /></label>
-                </div>
-                <label>NBIRTH procedure <input id="srcSpEnsProcedures" placeholder="bridge_node_db.stage_db.create_edge_node_schema (comma-separated)" /></label>
-                <div class="muted">catalog.schema.procedure, called as procedure(prefix, group_id, edge_node_id, false) like create_edge_node_schema.</div>
-                <div class="muted">Username and password: in the configuration file only.</div>
-              </div>
-
-              <div class="split">
-                <label>Site <input id="srcSite" placeholder="plant1" /></label>
-                <label>Area <input id="srcArea" placeholder="production" /></label>
-              </div>
-              <div class="split">
-                <label>Line <input id="srcLine" placeholder="line1" /></label>
-                <label>Equipment <input id="srcEquipment" placeholder="plc1" /></label>
-              </div>
-
-              <label>
-                <span>Enabled</span>
-                <div class="row" style="gap:8px">
-                  <input id="srcEnabled" type="checkbox" style="width:18px;height:18px" checked />
-                  <span class="muted">Start source when connector runs</span>
-                </div>
-              </label>
-
-              <div class="row" style="margin-top:10px">
-                <button id="srcSubmit" class="btn btn-primary" type="submit">Add source</button>
-                <button id="srcReset" class="btn btn-secondary" type="button">Reset</button>
-              </div>
-
-              <div class="section-title">Notes</div>
-              <div class="muted">Editing a source updates the on-disk config and restarts the source inside the running bridge.</div>
-            </form>
-
-            <div>
-              <div class="subcard">
-                <div class="subcard-header">
-                  <div class="section-title" style="margin: 0">Configured sources</div>
-                  <div class="row" style="gap:8px">
-                    <button id="btnRefreshSources" class="btn btn-secondary" type="button">Refresh</button>
-                    <button class="iconbtn" type="button" data-toggle="collapse" data-target="#configuredSourcesBody" aria-label="Toggle Configured sources">▾</button>
-                  </div>
-                </div>
-                <div id="configuredSourcesBody" class="subcard-body" style="display:none">
-                  <table class="table" style="margin-top: 10px">
-                    <thead>
-                      <tr>
-                        <th style="width:44px"><input id="srcSelectAll" type="checkbox" /></th>
-                        <th>Name</th>
-                        <th>Protocol</th>
-                        <th>Endpoint</th>
-                        <th>Active</th>
-                        <th>Enabled</th>
-                        <th>Action</th>
-                        <th style="width:44px"></th>
-                      </tr>
-                    </thead>
-                    <tbody id="sourcesTbody"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card collapsible" style="grid-column: 1 / -1">
-        <div class="card-header">
-          <h2>Status</h2>
-          <div class="hint">Live connector state</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#statusBody" aria-label="Toggle Status">▾</button>
-        </div>
-        <div id="statusBody" class="card-body" style="display:none">
-          <div class="row" style="justify-content: flex-end">
-            <button id="btnRefreshStatus" class="btn btn-secondary" type="button">Refresh</button>
-          </div>
-          <div id="statusKVs" class="kvs"></div>
-        </div>
-      </div>
-
-      <div class="card collapsible" style="grid-column: 1 / -1">
-        <div class="card-header">
-          <h2>Metrics</h2>
-          <div class="hint">Counters & performance</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#metricsBody" aria-label="Toggle Metrics">▾</button>
-        </div>
-        <div id="metricsBody" class="card-body" style="display:none">
-          <div class="row" style="justify-content: flex-end">
-            <button id="btnRefreshMetrics" class="btn btn-secondary" type="button">Refresh</button>
-          </div>
-          <div id="metricsKVs" class="kvs"></div>
-        </div>
-      </div>
-
-      <div class="card collapsible" style="grid-column: 1 / -1">
-        <div class="card-header">
-          <h2>Pipeline Diagnostics</h2>
-          <div class="hint">Message transformation pipeline: Raw Protocol → Vendor Detection → ISA-95 → ZeroBus</div>
-          <button class="iconbtn" type="button" data-toggle="collapse" data-target="#pipelineBody" aria-label="Toggle Pipeline">▾</button>
-        </div>
-        <div id="pipelineBody" class="card-body" style="display:none">
-          <div class="row" style="justify-content: space-between; margin-bottom: 16px">
-            <div class="row" style="gap: 12px">
-              <div id="vendorKepware" class="pill secondary"><strong>Kepware: 0</strong></div>
-              <div id="vendorSparkplug" class="pill secondary"><strong>Sparkplug B: 0</strong></div>
-              <div id="vendorHoneywell" class="pill secondary"><strong>Honeywell: 0</strong></div>
-              <div id="vendorGeneric" class="pill secondary"><strong>Generic: 0</strong></div>
-            </div>
-            <button id="btnRefreshPipeline" class="btn btn-secondary" type="button">Refresh</button>
-          </div>
-
-          <div id="pipelineFlowContainer">
-            <!-- Per-vendor pipelines will be dynamically rendered here -->
-          </div>
-
-          <div class="section-title" style="margin-top: 24px">Normalization Status</div>
-          <div id="pipelineNormStatus" class="muted">ISA-95 normalization: checking...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="toast" class="toast"></div>
-  <script src="/static/app.js"></script>
-</body>
-</html>        """
     async def _auth_gate(self, request: web.Request) -> Optional[web.Response]:
         """Return a redirect response if auth is enabled and user not authenticated."""
         if self.auth_manager:
@@ -1115,28 +731,18 @@ class WebServer:
                 return web.HTTPFound('/static/login.html')
         return None
 
-    async def serve_legacy_index(self, request: web.Request) -> web.Response:
-        """Serve legacy (vanilla JS) UI at /legacy."""
-        gated = await self._auth_gate(request)
-        if gated:
-            return gated
-        return web.Response(text=self._legacy_index_html(), content_type='text/html')
-
     async def serve_index(self, request: web.Request) -> web.Response:
-        """Serve React UI at / (fallback to legacy if build missing)."""
+        """The React UI at / (a note on how to build it if the build is missing; the API works either way)."""
         gated = await self._auth_gate(request)
         if gated:
             return gated
 
-        # If React build exists, serve it. Otherwise fall back to legacy UI.
-        static_dir = Path(__file__).parent / "static" / "connector-ui"
-        index_file = static_dir / "index.html"
+        index_file = Path(__file__).parent / "static" / "connector-ui" / "index.html"
         if index_file.exists():
             return web.FileResponse(path=index_file)
+        return web.Response(text=NO_UI_HTML, content_type='text/html')
 
-        return await self.serve_legacy_index(request)
-
-    # Authentication Handlers (NIS2 compliance)
+    # Authentication Handlers
 
     async def handle_login(self, request: web.Request) -> web.Response:
         """Redirect to OAuth provider for authentication."""

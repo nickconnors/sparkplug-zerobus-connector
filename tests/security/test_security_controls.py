@@ -191,10 +191,10 @@ class TestInputValidation:
         from unified_connector.web.input_validation import validate_endpoint, ValidationError
 
         command_injection_payloads = [
-            "opc.tcp://localhost:4840; rm -rf /",
+            "mqtt://localhost:1883; rm -rf /",
             "mqtt://broker.test$(whoami)",
-            "modbus://host|cat /etc/passwd",
-            "opc.tcp://host`id`",
+            "mqtts://host|cat /etc/passwd",
+            "mqtt://host`id`",
         ]
 
         for payload in command_injection_payloads:
@@ -285,7 +285,7 @@ class TestEncryption:
             )
 
             # Fernet uses AES-128-CBC by default, but with PBKDF2 key derivation
-            # from 256-bit master key, this meets NIS2 requirements
+            # from a 256-bit master key
             plaintext = "test-data"
             encrypted = encryption.encrypt(plaintext)
             decrypted = encryption.decrypt(encrypted)

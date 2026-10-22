@@ -7,8 +7,6 @@ Protects against injection attacks and malicious input:
 - Path traversal
 - XSS via data inputs
 - Resource name validation
-
-NIS2 Compliance: Article 21.2(a) - Security Policies
 """
 
 import re
@@ -32,7 +30,7 @@ SAFE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_\-\.]+$')
 SAFE_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_]*$')
 IP_ADDRESS_PATTERN = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
 HOSTNAME_PATTERN = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$')
-URL_PATTERN = re.compile(r'^(https?|opc\.tcp|mqtt|modbus)://[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=]+$')
+URL_PATTERN = re.compile(r'^(https?|mqtts?)://[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=]+$')
 
 # Dangerous characters that might indicate injection attempts
 DANGEROUS_CHARS = ['<', '>', '"', "'", ';', '|', '&', '`', '$', '(', ')', '{', '}', '[', ']', '\n', '\r', '\x00']
@@ -88,7 +86,7 @@ def validate_protocol(protocol: str) -> str:
     Raises:
         ValidationError: If protocol is invalid
     """
-    valid_protocols = ['opcua', 'mqtt', 'modbus', 'sparkplug']
+    valid_protocols = ['sparkplug']
 
     protocol = protocol.lower().strip()
 
@@ -293,12 +291,9 @@ def validate_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
     validated['endpoint'] = validate_endpoint(config['endpoint'])
 
     # Validate optional fields
-    optional_fields = ['enabled', 'site', 'area', 'line', 'equipment', 'security_mode',
-                      'polling_mode', 'polling_interval_ms', 'subscription_mode',
-                      'normalization_enabled', 'target_table',
-                      # Sparkplug B (sparkplug/README.md); its username and password stay in the config file
-                      'client_id', 'primary_host_id', 'state_format', 'offline_after_seconds',
-                      'online_after_seconds', 'edge_node_schemas']
+    # (sparkplug/README.md); the username, password, topics and TLS settings stay in the config file
+    optional_fields = ['enabled', 'target_table', 'client_id', 'primary_host_id', 'state_format',
+                       'offline_after_seconds', 'online_after_seconds', 'edge_node_schemas']
 
     for field in optional_fields:
         if field in config:

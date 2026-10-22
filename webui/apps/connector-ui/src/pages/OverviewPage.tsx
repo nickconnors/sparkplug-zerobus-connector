@@ -1,7 +1,7 @@
 import { Button, Panel, StatusPill } from "@ot/ui-kit";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { connectorApi } from "../api/connectorApi";
-import type { ConnectorStatus } from "../api/types";
+import type { ConnectorStatus, SparkplugHealth } from "../api/types";
 import { useAuthState } from "../auth/AuthContext";
 import { useAppToast } from "../toast/ToastContext";
 
@@ -9,6 +9,7 @@ export function OverviewPage() {
   const { can } = useAuthState();
   const toast = useAppToast();
   const [status, setStatus] = useState<ConnectorStatus | null>(null);
+  const [health, setHealth] = useState<SparkplugHealth>({});
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -19,8 +20,9 @@ export function OverviewPage() {
     }
     setLoading(true);
     try {
-      const st = await connectorApi.getStatus();
+      const [st, sh] = await Promise.all([connectorApi.getStatus(), connectorApi.getSparkplugHealth()]);
       setStatus(st);
+      setHealth(sh ?? {});
       setLastUpdated(new Date());
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Failed to refresh", "bad");
@@ -39,15 +41,6 @@ export function OverviewPage() {
       (st as any)?.zerobus_connected ?? (st as any)?.zerobus?.connected ?? (st as any)?.zerobusConnected;
     const configured = (st as any)?.configured_sources;
     const active = (st as any)?.active_sources;
-    const discoveryCount = (st as any)?.discovery_count;
-
-    const discoveryText =
-      typeof discoveryCount === "number"
-        ? `Discovery: ${discoveryCount} found`
-        : typeof (st as any)?.discovery?.enabled === "boolean"
-          ? `Discovery: ${(st as any).discovery.enabled ? "on" : "off"}`
-          : "Discovery: unknown";
-    const discoveryKind: "ok" | "warn" | "bad" = typeof discoveryCount === "number" ? (discoveryCount > 0 ? "ok" : "warn") : "warn";
 
     const sourcesText =
       typeof configured === "number" && typeof active === "number"
@@ -68,7 +61,6 @@ export function OverviewPage() {
       typeof zerobusConnected === "boolean" ? (zerobusConnected ? "ok" : "bad") : "warn";
 
     return {
-      discovery: { text: discoveryText, kind: discoveryKind },
       sources: { text: sourcesText, kind: sourcesKind },
       zerobus: { text: zbText, kind: zbKind },
     };
@@ -91,12 +83,16 @@ export function OverviewPage() {
         }
       >
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <StatusPill kind={badges.discovery.kind}>{badges.discovery.text}</StatusPill>
           <StatusPill kind={badges.sources.kind}>{badges.sources.text}</StatusPill>
           <StatusPill kind={badges.zerobus.kind}>{badges.zerobus.text}</StatusPill>
+          {Object.entries(health).map(([name, h]) => (
+            <StatusPill key={name} kind={h.state === "ONLINE" ? "ok" : "bad"}>
+              {name}: {h.primary_host_id ? `primary host ${String(h.state ?? "unknown")}` : h.mqtt_connected ? "subscribed" : "not connected"}
+            </StatusPill>
+          ))}
         </div>
         <div className="muted" style={{ marginTop: 10 }}>
-          Mirrors legacy overview badges driven by <code>/api/status</code>.
+          Driven by <code>/api/status</code> and <code>/api/sparkplug/health</code> (each running source's state).
         </div>
       </Panel>
     </div>

@@ -15,15 +15,13 @@ async def test_connector_root_serves_react_index_when_present():
     assert isinstance(resp, web.FileResponse)
 
 
-async def test_connector_legacy_route_serves_legacy_html():
-    from unified_connector.web.web_server import WebServer
+async def test_connector_root_explains_how_to_build_the_ui_when_it_is_missing(monkeypatch, tmp_path):
+    from unified_connector.web import web_server
 
-    ws = WebServer(config={}, bridge=None)
+    monkeypatch.setattr(web_server, "__file__", str(tmp_path / "web_server.py"))   # no static/connector-ui here
+    ws = web_server.WebServer(config={}, bridge=None)
     ws.auth_manager = None
 
-    req = make_mocked_request("GET", "/legacy")
-    resp = await ws.serve_legacy_index(req)
-    assert isinstance(resp, web.Response)
-    assert resp.content_type == "text/html"
-    assert "/static/app.js" in resp.text
-    assert "/static/style.css" in resp.text
+    resp = await ws.serve_index(make_mocked_request("GET", "/"))
+    assert isinstance(resp, web.Response) and resp.content_type == "text/html"
+    assert "npm run build" in resp.text and "/health" in resp.text

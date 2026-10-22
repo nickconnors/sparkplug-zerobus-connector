@@ -2,7 +2,6 @@
 Input Validation Tests
 
 Tests input validation to prevent injection attacks.
-NIS2 Compliance: Article 21.2(a) - Security Policies
 """
 
 import pytest
@@ -74,15 +73,14 @@ class TestProtocolValidation:
 
     def test_valid_protocols(self):
         """Test valid protocols are accepted."""
-        valid_protocols = ['opcua', 'mqtt', 'modbus', 'OPCUA', 'MQTT', 'MODBUS']
-        expected = ['opcua', 'mqtt', 'modbus', 'opcua', 'mqtt', 'modbus']
-        for protocol, expected_val in zip(valid_protocols, expected):
-            assert validate_protocol(protocol) == expected_val
+        for protocol in ('sparkplug', 'SPARKPLUG', ' Sparkplug '):
+            assert validate_protocol(protocol) == 'sparkplug'
 
     def test_invalid_protocol(self):
         """Test invalid protocols are rejected."""
-        with pytest.raises(ValidationError, match="Invalid protocol"):
-            validate_protocol('http')
+        for protocol in ('http', 'opcua', 'mqtt', 'modbus'):
+            with pytest.raises(ValidationError, match="Invalid protocol"):
+                validate_protocol(protocol)
 
         with pytest.raises(ValidationError, match="Invalid protocol"):
             validate_protocol('malicious')
@@ -94,9 +92,9 @@ class TestEndpointValidation:
     def test_valid_endpoints(self):
         """Test valid endpoints are accepted."""
         valid_endpoints = [
-            'opc.tcp://192.168.1.100:4840',
             'mqtt://localhost:1883',
-            'modbus://10.0.0.50:502',
+            'mqtts://broker.example.com:8883',
+            'mqtt://10.0.0.50:1883',
             'https://example.com:443/api',
         ]
         for endpoint in valid_endpoints:
@@ -110,9 +108,9 @@ class TestEndpointValidation:
     def test_command_injection(self):
         """Test command injection attempts are rejected."""
         malicious_endpoints = [
-            'opc.tcp://host;rm -rf /',
+            'mqtt://host;rm -rf /',
             'mqtt://host|cat /etc/passwd',
-            'modbus://host`whoami`',
+            'mqtts://host`whoami`',
             'http://host$(uname -a)',
         ]
         for endpoint in malicious_endpoints:
@@ -123,7 +121,7 @@ class TestEndpointValidation:
         """Test variable expansion is rejected."""
         malicious_endpoints = [
             'http://${USER}:${PASS}@host',
-            'opc.tcp://${HOSTNAME}',
+            'mqtt://${HOSTNAME}',
         ]
         for endpoint in malicious_endpoints:
             with pytest.raises(ValidationError):
@@ -215,22 +213,24 @@ class TestSourceConfigValidation:
         """Test valid configuration is accepted."""
         config = {
             'name': 'test-source',
-            'protocol': 'opcua',
-            'endpoint': 'opc.tcp://192.168.1.100:4840',
+            'protocol': 'sparkplug',
+            'endpoint': 'mqtts://192.168.1.100:8883',
             'enabled': True,
-            'site': 'plant1',
+            'primary_host_id': 'databricks-zerobus',
+            'site': 'plant1',                       # not a Sparkplug setting: dropped
         }
         validated = validate_source_config(config)
         assert validated['name'] == 'test-source'
-        assert validated['protocol'] == 'opcua'
-        assert validated['enabled'] is True
+        assert validated['protocol'] == 'sparkplug'
+        assert validated['enabled'] is True and validated['primary_host_id'] == 'databricks-zerobus'
+        assert 'site' not in validated
 
     def test_missing_required_fields(self):
         """Test missing required fields are rejected."""
         incomplete_configs = [
-            {'protocol': 'opcua', 'endpoint': 'opc.tcp://host:4840'},  # missing name
-            {'name': 'test', 'endpoint': 'opc.tcp://host:4840'},  # missing protocol
-            {'name': 'test', 'protocol': 'opcua'},  # missing endpoint
+            {'protocol': 'sparkplug', 'endpoint': 'mqtt://host:1883'},  # missing name
+            {'name': 'test', 'endpoint': 'mqtt://host:1883'},  # missing protocol
+            {'name': 'test', 'protocol': 'sparkplug'},  # missing endpoint
         ]
         for config in incomplete_configs:
             with pytest.raises(ValidationError, match="Missing required field"):
@@ -240,8 +240,8 @@ class TestSourceConfigValidation:
         """Test malicious configuration is rejected."""
         malicious_config = {
             'name': '../../../etc/passwd',
-            'protocol': 'opcua',
-            'endpoint': 'opc.tcp://host;rm -rf /',
+            'protocol': 'sparkplug',
+            'endpoint': 'mqtt://host;rm -rf /',
         }
         with pytest.raises(ValidationError):
             validate_source_config(malicious_config)

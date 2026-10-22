@@ -3,10 +3,7 @@ import type {
   AuthStatus,
   ConnectorMetrics,
   ConnectorStatus,
-  DiscoveredServersResponse,
-  DiscoveryTestRequest,
   PermissionsResponse,
-  PipelineDiagnostics,
   SourceConfig,
   SparkplugHealth,
   ZeroBusConfig,
@@ -21,15 +18,6 @@ export const connectorApi = {
   // status / metrics
   getStatus: () => apiJson<ConnectorStatus>("/api/status"),
   getMetrics: () => apiJson<ConnectorMetrics>("/api/metrics"),
-
-  // discovery
-  scanDiscovery: () => apiJson<{ status: string; message?: string }>("/api/discovery/scan", { method: "POST", body: "{}" }),
-  getDiscovered: (protocol?: string) => {
-    const q = protocol ? `?protocol=${encodeURIComponent(protocol)}` : "";
-    return apiJson<DiscoveredServersResponse>(`/api/discovery/servers${q}`);
-  },
-  testDiscovery: (req: DiscoveryTestRequest) =>
-    apiJson<Record<string, unknown>>("/api/discovery/test", { method: "POST", body: JSON.stringify(req) }),
 
   // sources
   getSources: () => apiJson<{ sources?: SourceConfig[] } | SourceConfig[]>("/api/sources"),
@@ -61,9 +49,6 @@ export const connectorApi = {
 
   // sparkplug
   getSparkplugHealth: () => apiJson<SparkplugHealth>("/api/sparkplug/health"),
-
-  // pipeline
-  getPipelineDiagnostics: () => apiJson<PipelineDiagnostics>("/api/diagnostics/pipeline"),
 
   // health (useful for smoke tests / boot)
   getHealth: () => apiText("/health"),
