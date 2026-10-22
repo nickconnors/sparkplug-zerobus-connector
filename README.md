@@ -87,7 +87,7 @@ certificates and the other TLS settings go under the source's `security:` (comme
 
 ```
 docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
-docker run -d --name sparkplug-zerobus --restart unless-stopped --env-file connector.env \
+docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 --env-file connector.env \
   -p 127.0.0.1:8001:8001 \
   --mount type=bind,source="$PWD/my-config.yaml",target=/app/sparkplug_connector/config/config.yaml \
   --mount type=volume,source=connector-wal,target=/app/wal \
@@ -95,11 +95,19 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --env-file conne
 ```
 
 - Your file is mounted over the shipped example and passed with `--config`; edits made on the web page are
-  saved into it, so don't mount it read-only.
+  saved into it, so don't mount it read-only. The container runs as uid 1000: on Linux, make the file
+  writable by it (`sudo chown 1000 my-config.yaml`), or the page's saves fail.
 - Use `--mount`, not `-v`, for the file: if the file doesn't exist, `-v` creates an empty directory in its
   place (on Windows as well), and the connector fails with `IsADirectoryError`; `--mount` stops with an error.
-- The `connector-wal` volume keeps the write-ahead log (`zerobus.wal.enabled: true`, path `wal` = `/app/wal`)
-  across container restarts.
+- The `connector-wal` volume keeps the write-ahead log (`zerobus.wal`, on in the example, path `wal` =
+  `/app/wal`) across container restarts.
+- `--stop-timeout 30`: on `docker stop` the connector first publishes OFFLINE (a primary host's edges start
+  buffering), then writes what is queued, which can take up to ~20 s (`drain_timeout_seconds`, 15). Docker's
+  default is 10 s, then SIGKILL; with the write-ahead log the rows not written are sent after the next start,
+  without it they are lost. In Compose: `stop_grace_period: 30s`.
+- Logs go to the console only (`docker logs`; the image sets `CONNECTOR_LOG_FILES=false`): set a size limit
+  in Docker's logging options (e.g. `--log-opt max-size=50m --log-opt max-file=5`). Outside Docker the
+  connector also writes rotated log files to `/tmp/sparkplug_connector_logs`.
 - The image is Python only: build the web UI first (below) to include it; without it `/` explains how.
 - The web UI is on port 8001 (`web_ui.port`). Publish it on 127.0.0.1, or switch the login on (below)
   before publishing it more widely.
@@ -161,7 +169,9 @@ with `require_client_cert: true`).
 
 ## Credentials
 
-- **Environment** (recommended for containers): `${env:NAME}` in the file.
+- **Environment** (the way for containers): `${env:NAME}` in the file. The encrypted store below lives in the
+  container's home directory, so a secret saved on the web page is gone when the container is recreated
+  (and isn't stored at all without `CONNECTOR_MASTER_PASSWORD`).
 - **Encrypted store**: `${credential:zerobus.client_secret}` in the file reads `~/.sparkplug_connector/credentials.enc`
   (Fernet, key from `CONNECTOR_MASTER_PASSWORD`); the web page's ZeroBus form stores a new client secret
   there and writes only the placeholder. `CONNECTOR_ZEROBUS_CLIENT_ID` / `CONNECTOR_ZEROBUS_CLIENT_SECRET`
