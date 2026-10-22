@@ -2,14 +2,14 @@
 each fixtures/transmission/*.bin, and the golden sample fixtures/sample_dbirth.json (keys sorted and
 indented, as a table that sorts object keys stores it).
 
-    TAHU_JVM=<Java 17 libjvm> .venv312/bin/python tests/sparkplug/make_expected.py
+    TAHU_JVM=<Java 17 libjvm> .venv/bin/python tests/make_expected.py
 """
 import json
 import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import java_tahu  # noqa: E402
 import make_fixtures  # noqa: E402

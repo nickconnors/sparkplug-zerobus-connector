@@ -110,6 +110,18 @@ def test_the_endpoint_gives_host_port_and_tls(endpoint, expected):
     assert c.security_config.use_tls is expected[2]
 
 
+def test_the_tls_settings_are_logged_at_connect(caplog):
+    c = create_protocol_client("sparkplug", "s", "mqtts://chariot:8883",
+                               {"username": "u", "security": {"ca_cert_path": "/certs/ca.pem"}}, on_record=lambda r: None)
+    with caplog.at_level("INFO"):
+        c.security_manager.log_security_status()
+    assert "CA Certificate: /certs/ca.pem" in caplog.text and "Mutual TLS (mTLS): DISABLED" in caplog.text
+    plain = create_protocol_client("sparkplug", "s", "mqtt://chariot:1883", {"username": "u"}, on_record=lambda r: None)
+    with caplog.at_level("INFO"):
+        plain.security_manager.log_security_status()
+    assert "MQTT Security: DISABLED" in caplog.text
+
+
 def test_factory_refuses_other_protocols():
     for protocol in ("mqtt", "opcua", "modbus"):
         with pytest.raises(ValueError, match="Unsupported protocol"):
@@ -127,6 +139,15 @@ def test_handle_message_hands_on_rows_and_counts_skips():
     stats = c.stats()
     assert stats["messages_received"] == len(messages) + len(SKIPPED) and stats["rows"] == len(messages) == len(rows)
     assert {k: v for k, v in stats.items() if k.startswith("skipped_") and v} == dict(Counter(s for _, _, s in SKIPPED))
+
+
+def test_the_client_reports_its_stats_every_100_messages():
+    reported = []
+    c = SparkplugClient("chariot", "mqtt://chariot:1883", {}, on_record=lambda r: None, on_stats=reported.append)
+    topic, payload, _ = transmission_messages()[0]
+    for _ in range(250):
+        c.handle_message(topic, payload, 1)
+    assert [r["messages_received"] for r in reported] == [100, 200]
 
 
 def test_a_row_the_bridge_cant_take_is_counted_and_the_next_messages_go_on():

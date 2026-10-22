@@ -33,3 +33,4 @@ session_keys.txt
 # OAuth state
 oauth_state/
 .oauth_cache/
+.coverage

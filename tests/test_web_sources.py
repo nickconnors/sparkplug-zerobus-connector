@@ -314,3 +314,45 @@ async def test_a_source_that_fails_to_start_with_its_new_settings_runs_on_with_t
     with pytest.raises(ValueError, match="can't use that endpoint"):
         await bridge.update_source("m", {**old, "endpoint": "mqtt://broken:1883"})
     assert running(bridge, "m")["endpoint"] == old["endpoint"] and "m" in bridge.clients
+
+
+async def test_add_and_edit_errors_are_reported_and_nothing_is_saved(page, started, monkeypatch):
+    http, path, bridge = page
+    before = path.read_text()
+    form = {"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883", "enabled": True}
+    async with http.post("/api/sources", json=form) as r:              # running already
+        assert r.status == 500 and "already exists" in (await r.json())["message"]
+    async with http.put("/api/sources/bad%20name", json=form) as r:
+        assert r.status == 400 and "Invalid source name" in (await r.json())["message"]
+    async with http.put("/api/sources/nope", json={**form, "name": "nope"}) as r:
+        assert r.status == 404
+
+    async def broken(name, config):
+        raise RuntimeError("restart failed")
+    monkeypatch.setattr(bridge, "update_source", broken)
+    async with http.put("/api/sources/sp", json=form) as r:
+        assert r.status == 500 and (await r.json())["message"] == "restart failed"
+    assert path.read_text() == before
+
+
+@pytest.mark.parametrize("master_password", ["", "a-master-password"])
+async def test_saving_zerobus_credentials_never_writes_the_secret_to_the_file(page, started, monkeypatch, master_password):
+    http, path, bridge = page
+    if master_password:
+        monkeypatch.setenv("CONNECTOR_MASTER_PASSWORD", master_password)
+    else:
+        monkeypatch.delenv("CONNECTOR_MASTER_PASSWORD", raising=False)
+    async with http.post("/api/zerobus/config", json={"auth": {"client_id": "new-id", "client_secret": "new-secret"}}) as r:
+        assert r.status == 200, await r.text()
+        body = await r.json()
+    text = path.read_text()
+    auth = yaml.safe_load(text)["zerobus"]["auth"]
+    assert "new-secret" not in text and auth["client_secret"] == "${credential:zerobus.client_secret}"
+    if master_password:                                     # both in the encrypted credential store
+        assert "warning" not in body and auth["client_id"] == "${credential:zerobus.client_id}"
+        assert bridge.zerobus_config["auth"] == {"client_id": "new-id", "client_secret": "new-secret"}
+    else:                                                   # no store: the id in the file, the secret nowhere
+        assert "NOT stored" in body["warning"] and auth["client_id"] == "new-id"
+    async with http.get("/api/zerobus/config") as r:
+        shown = (await r.json())["auth"]
+    assert "new-secret" not in str(shown)

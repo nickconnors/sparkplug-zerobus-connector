@@ -95,6 +95,7 @@ class SparkplugClient(ProtocolClient):
         await self.online_allowed.wait()
         if not self.security_manager.validate_configuration():
             raise ValueError("Invalid MQTT security configuration")
+        self.security_manager.log_security_status()
         tls_context = self.security_manager.create_ssl_context() if self.security_config.use_tls else None
         t = int(time.time() * 1000)
         will = None

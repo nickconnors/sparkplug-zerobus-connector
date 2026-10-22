@@ -265,11 +265,6 @@ class WebServer:
                     status=400
                 )
 
-            # a target_table that isn't catalog.schema.table (core/targets.py)
-            conflicts = self.bridge.target_errors(self.bridge.sources + [data])
-            if conflicts:
-                return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
-
             # Add to bridge
             await self.bridge.add_source(
                 source_name=data['name'],
@@ -334,11 +329,7 @@ class WebServer:
             current = next((s for s in self.bridge.sources if s.get('name') == source_name), None)
             if current is None:
                 return web.json_response({'status': 'error', 'message': f"Source not found: {source_name}"}, status=404)
-            edited = _edited(current, current, data)
-            conflicts = self.bridge.target_errors([edited if s is current else s for s in self.bridge.sources])
-            if conflicts:   # a target_table that isn't catalog.schema.table (core/targets.py)
-                return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
-            await self.bridge.update_source(source_name, edited)
+            await self.bridge.update_source(source_name, _edited(current, current, data))
 
             # Update config file (unchanged fields keep the file's spelling, e.g. a ${env:...} placeholder)
             self._save_sources(lambda sources: [

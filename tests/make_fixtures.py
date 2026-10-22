@@ -16,8 +16,8 @@ sends these shapes; the names, UDTs and values here are made up:
 ``golden_dbirth()`` is a second device's birth for ``fixtures/sample_dbirth.json`` (``make_expected.py``).
 Deterministic (fixed timestamps, seeded values). After a change, regenerate Java Tahu's JSON too:
 
-    .venv312/bin/python tests/sparkplug/make_fixtures.py
-    TAHU_JVM=<Java 17 libjvm> .venv312/bin/python tests/sparkplug/make_expected.py
+    .venv/bin/python tests/make_fixtures.py
+    TAHU_JVM=<Java 17 libjvm> .venv/bin/python tests/make_expected.py
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ import zlib
 from typing import Any
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1]))
+sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from payloads import u32, u64  # noqa: E402
 from unified_connector.sparkplug import sparkplug_b_pb2 as pb  # noqa: E402

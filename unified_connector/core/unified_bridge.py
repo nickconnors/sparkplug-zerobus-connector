@@ -238,16 +238,6 @@ class UnifiedBridge:
         await self._create_target(target_id, target_config)
         self._start_writer(target_id)
 
-    def target_errors(self, sources: Optional[List[Dict[str, Any]]] = None) -> List[str]:
-        """The sources (default: the configured ones) whose target_table isn't catalog.schema.table."""
-        problems = []
-        for s in self.sources if sources is None else sources:
-            try:
-                source_tables.target_config(s, self.zerobus_config)
-            except ValueError as e:
-                problems.append(f"{s.get('name')}: {e}")
-        return problems
-
     async def _open_wal(self, target_id: str) -> None:
         """The target's write-ahead log (once per process: Zerobus may be stopped and started again), its rows
         not acknowledged before the last stop written first."""

@@ -1,10 +1,10 @@
-"""tests/sparkplug: the repository root on sys.path, and the Java Tahu reference as a fixture."""
+"""tests: the repository root on sys.path, and the Java Tahu reference as a fixture."""
 import pathlib
 import sys
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))

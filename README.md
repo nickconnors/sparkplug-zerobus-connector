@@ -25,7 +25,7 @@ pip install -r requirements.txt
 .venv312c/bin/python -m pytest -q tests
 ```
 
-The Sparkplug B tests (`tests/sparkplug/`) have extra test-only dependencies (`pip install -r tests/sparkplug/requirements.txt`). Some of them need **Java 17** (Eclipse Tahu's Java implementation is the reference for the JSON, through JPype; `TAHU_JVM`, `TAHU_JAVA_CLASSPATH`) or **Docker** with the `eclipse-mosquitto:2` image; they are skipped when those aren't available.
+The tests (`tests/`) have extra test-only dependencies (`pip install -r tests/requirements.txt`). Some of them need **Java 17** (Eclipse Tahu's Java implementation is the reference for the JSON, through JPype; `TAHU_JVM`, `TAHU_JAVA_CLASSPATH`) or **Docker** with the `eclipse-mosquitto:2` image; they are skipped when those aren't available.
 
 ## NIS2 Directive Compliance
 

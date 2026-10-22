@@ -215,7 +215,7 @@ it in `webui/` first to include it.
 `raw_row.py` (topics, skip rules, rows), `tahu_json.py` + `java_format.py` (Tahu's JSON; see `NOTICE.md`
 for the EPL-2.0 parts), `host.py` (STATE, HostState, HostSupervisor), `edge_node_schemas.py` (NBIRTH
 calls), `../protocols/sparkplug_client.py` (the source), `../core/confirmed_writer.py`, `../core/wal.py`.
-Tests: `tests/sparkplug/` (Eclipse Tahu's Java implementation as the reference, through JPype:
+Tests: `tests/` (Eclipse Tahu's Java implementation as the reference, through JPype:
 `java_tahu.py`; a real Mosquitto for the primary host: `test_primary_host.py`; test-only dependencies in
 its `requirements.txt`). The payload fixtures are synthetic, shaped like MQTT Transmission's
 (`make_fixtures.py`); `make_expected.py` writes Java Tahu's JSON for them.
