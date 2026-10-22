@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import json
 
 from conftest import FIXTURES
@@ -13,17 +12,18 @@ from unified_connector.sparkplug.raw_row import convert
 NDEATH = (FIXTURES / "transmission" / "ndeath-1.bin").read_bytes()
 
 
-def config(tmp_path, confirmed: bool, spool: bool = False) -> dict:
+def config(tmp_path) -> dict:
+    """Sources a (the default table, table_a) and b (source_targets: table_b), both enabled."""
     target = {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c", "schema": "s"}
     return {
-        "sources": [],
-        "zerobus": {"enabled": True, "confirmed_writes": confirmed, "zerobus_endpoint": "https://example.zerobus",
+        "sources": [{"name": n, "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True}
+                    for n in ("a", "b")],
+        "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {**target, "table": "table_a"},
                     "source_targets": {"b": {"table": "table_b"}},
                     "batch": {"max_records": 500, "timeout_seconds": 0.05, "linger_seconds": 0.02}},
-        "normalization": {"enabled": False},
-        "backpressure": {"disk_spool": {"enabled": spool, "encryption": spool, "path": str(tmp_path / "spool")}},
+        "backpressure": {},
     }
 
 
@@ -37,7 +37,7 @@ async def wait_for(condition, timeout=5.0):
             await asyncio.sleep(0.01)
 
 
-async def test_each_target_gets_only_its_sources_rows_with_confirmed_writes(monkeypatch, tmp_path):
+async def test_each_target_gets_only_its_sources_rows(monkeypatch, tmp_path):
     streams: dict[str, FakeStreams] = {}
 
     class FakeRowStreams:
@@ -49,7 +49,7 @@ async def test_each_target_gets_only_its_sources_rows_with_confirmed_writes(monk
             return await streams[self.table].open()
 
     monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
-    bridge = unified_bridge.UnifiedBridge(config(tmp_path, confirmed=True))
+    bridge = unified_bridge.UnifiedBridge(config(tmp_path))
     await bridge.start_infra()
     try:
         a, b = rows("A", 5), rows("B", 3)
@@ -66,43 +66,6 @@ async def test_each_target_gets_only_its_sources_rows_with_confirmed_writes(monk
     metrics = bridge.get_metrics()["backpressure"]
     assert metrics["records_enqueued"] == 8
     assert {t: m["records_enqueued"] for t, m in metrics["targets"].items()} == {"example.c.s.table_a": 5, "example.c.s.table_b": 3}
-
-
-async def test_each_target_gets_only_its_sources_rows_on_the_old_path(monkeypatch, tmp_path):
-    sent: dict[str, list[dict]] = {}
-
-    class FakeZeroBusClient:
-        def __init__(self, cfg):
-            t = cfg["zerobus"]["target"]
-            self.table = f"{t['catalog']}.{t['schema']}.{t['table']}"
-
-        async def connect(self):
-            pass
-
-        async def send_batch(self, batch):
-            sent.setdefault(self.table, []).extend(batch)
-            return True
-
-        async def close(self):
-            pass
-
-        def get_metrics(self):
-            return {}
-
-    monkeypatch.setattr(unified_bridge, "ZeroBusClient", FakeZeroBusClient)
-    bridge = unified_bridge.UnifiedBridge(config(tmp_path, confirmed=False))
-    await bridge.start_infra()
-    try:
-        a, b = rows("A", 4), rows("B", 2)
-        for r in a:
-            bridge._on_record(r, "a")
-        for r in b:
-            bridge._on_record(r, "b")
-        await wait_for(lambda: sum(len(v) for v in sent.values()) == 6)
-    finally:
-        await bridge.stop()
-    assert {t: [m["msg_id"] for m in v] for t, v in sent.items()} == {
-        "c.s.table_a": [r.msg_id for r in a], "c.s.table_b": [r.msg_id for r in b]}
 
 
 async def test_a_source_s_records_go_to_its_target_s_queue(monkeypatch, tmp_path):
@@ -123,9 +86,9 @@ async def test_a_source_s_records_go_to_its_target_s_queue(monkeypatch, tmp_path
         return handed[source_name]
 
     monkeypatch.setattr(unified_bridge, "create_protocol_client", factory)
-    bridge = unified_bridge.UnifiedBridge(config(tmp_path, confirmed=False))
+    bridge = unified_bridge.UnifiedBridge(config(tmp_path))
     for name in ("a", "b"):
-        await bridge._start_client({"name": name, "protocol": "mqtt", "endpoint": "mqtt://localhost:1883"})
+        await bridge._start_client({"name": name, "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883"})
     try:
         handed["b"].on_record(rows("B", 1)[0])
         handed["a"].on_record(rows("A", 1)[0])
@@ -138,17 +101,3 @@ async def test_a_source_s_records_go_to_its_target_s_queue(monkeypatch, tmp_path
         for task in bridge.client_tasks.values():
             task.cancel()
         await asyncio.gather(*bridge.client_tasks.values(), return_exceptions=True)
-
-
-async def test_spools_are_per_target_with_one_encryption_key(tmp_path):
-    bridge = unified_bridge.UnifiedBridge(config(tmp_path, confirmed=True, spool=True))
-    queue_b = bridge._queue_for_source("b")
-    assert bridge.backpressure.spool_dir == tmp_path / "spool" / "example.c.s.table_a"
-    assert queue_b.spool_dir == tmp_path / "spool" / "example.c.s.table_b"
-    assert bridge.backpressure.spool_dir.is_dir() and queue_b.spool_dir.is_dir()
-    assert [p.name for p in (tmp_path / "certs").iterdir()] == ["spool_encryption.key"]
-    assert await queue_b._spool_to_disk({"n": 1})
-    assert await queue_b._load_from_spool() == {"n": 1}     # encrypted with the shared key
-    when = datetime.datetime(2026, 10, 20, 12, 0, tzinfo=datetime.timezone.utc)   # e.g. an OPC-UA DateTime value
-    assert await queue_b._spool_to_disk({"value": when})
-    assert await queue_b._load_from_spool() == {"value": str(when)}

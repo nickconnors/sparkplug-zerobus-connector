@@ -1,13 +1,13 @@
 .venv/
 .venv312/
-.venv312c/
+venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.hypothesis/
 dist/
 build/
 *.egg-info/
-venv/
 
 # Log files
 *.log
@@ -15,20 +15,13 @@ venv/
 
 # Local runtime state (do not commit)
 .unified_connector/
-spool/
 wal/
 certs/
 
-# Built React WebUI assets (built via webui/ workspace)
-# NOTE: keep simulator UI build artifacts tracked so `app.yaml` deployments
-# can serve the React UI without running a Node build step.
+# Built React web UI (npm run build in webui/)
 unified_connector/web/static/connector-ui/
 
-# Security certificates (self-signed for development)
-ot_simulator/certs/*.pem
-ot_simulator/certs/*.key
-
-# Environment variables and secrets (NIS2 Compliance - NEVER COMMIT)
+# Environment variables and secrets: never commit
 .env
 .env.local
 .env.*.local
@@ -37,28 +30,6 @@ credentials.enc
 salt.txt
 session_keys.txt
 
-# Master passwords and OAuth credentials
-**/MASTER_PASSWORD.txt
-**/oauth_setup*.md
-oauth_setup_complete.md
-
-# Authentication tokens and OAuth state
+# OAuth state
 oauth_state/
 .oauth_cache/
-
-# Temporary development/tracking documents (keep locally, not in repo)
-docs/CONVERSATION_SUMMARY.md
-docs/DATABRICKS_APPS_DEPLOYMENT.md
-docs/DEPLOYMENT_CHECKLIST.md
-docs/FFT_FIXES_APPLIED.md
-docs/IMPLEMENTATION_PRIORITIES.md
-docs/INCOMPLETE_WORK_INVENTORY.md
-docs/PRIORITY_1_FFT_IMPLEMENTATION.md
-docs/SESSION_SUMMARY_VISUALIZATION_IMPLEMENTATION.md
-docs/VISUALIZATION_IMPROVEMENTS_ANALYSIS.md
-docs/VISUALIZATION_STATUS.md
-docs/WOT_BUG_FIXES_AND_TESTING.md
-docs/WOT_IMPLEMENTATION_FINAL_SUMMARY.md
-docs/WOT_IMPLEMENTATION_REPORT.md
-docs/WOT_IMPLEMENTATION_SUMMARY.md
-docs/WOT_ZEROBUS_INTEGRATION.md

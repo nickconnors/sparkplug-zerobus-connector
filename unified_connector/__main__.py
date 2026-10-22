@@ -1,7 +1,4 @@
-"""Unified OT Zerobus Connector Client - Main Entry Point.
-
-Enterprise-grade connector for OPC-UA, MQTT, and Modbus to Databricks Delta tables.
-"""
+"""The connector's entry point: Sparkplug B (MQTT) to Databricks Delta tables through Zerobus."""
 
 import asyncio
 import logging
@@ -14,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from unified_connector.core.config_loader import ConfigLoader
 from unified_connector.core.unified_bridge import UnifiedBridge
-from unified_connector.core.discovery import DiscoveryService
 from unified_connector.web.web_server import WebServer
 from unified_connector.core.advanced_logging import (
     LogRotationConfig,
@@ -22,7 +18,7 @@ from unified_connector.core.advanced_logging import (
     get_logging_manager
 )
 
-# Configure advanced logging with rotation and archiving (NIS2 compliance)
+# Logging with rotation and archiving
 log_config = LogRotationConfig(
     max_bytes=100 * 1024 * 1024,     # 100 MB per file
     backup_count=10,                  # Keep 10 backups
@@ -50,11 +46,9 @@ class UnifiedConnector:
 
         # Initialize components
         self.bridge = UnifiedBridge(self.config)
-        self.discovery = DiscoveryService(self.config.get('discovery', {}))
         self.web_server = WebServer(
             config=self.config,
             bridge=self.bridge,
-            discovery=self.discovery,
             config_path=self.config_loader.config_path,   # the page saves sources back to this file
         )
 
@@ -72,13 +66,8 @@ class UnifiedConnector:
     async def start(self):
         """Start all services."""
         logger.info("=" * 80)
-        logger.info("Unified OT Zerobus Connector Client - Starting")
+        logger.info("Sparkplug Zerobus connector - Starting")
         logger.info("=" * 80)
-
-        # Start discovery service
-        if self.config.get('discovery', {}).get('enabled', True):
-            await self.discovery.start()
-            logger.info("✓ Discovery service started")
 
         # Start web server first (so diagnostics/UI is responsive immediately)
         if self.config.get('web_ui', {}).get('enabled', True):
@@ -134,9 +123,6 @@ class UnifiedConnector:
             except asyncio.CancelledError:
                 pass
 
-        # Stop discovery
-        await self.discovery.stop()
-
         # Stop web server
         await self.web_server.stop()
 
@@ -171,7 +157,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Unified OT Zerobus Connector Client - OPC-UA, MQTT, Modbus to Databricks"
+        description="Sparkplug B (MQTT) to Databricks through Zerobus"
     )
     parser.add_argument(
         '--config',

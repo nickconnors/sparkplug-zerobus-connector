@@ -8,13 +8,11 @@
   ],
   "scripts": {
     "dev:connector": "npm run -w @ot/connector-ui dev",
-    "dev:simulator": "npm run -w @ot/simulator-ui dev",
-    "build": "npm run -w @ot/connector-ui build && npm run -w @ot/simulator-ui build",
-    "lint": "npm run -w @ot/connector-ui lint && npm run -w @ot/simulator-ui lint",
+    "build": "npm run -w @ot/connector-ui build",
+    "lint": "npm run -w @ot/connector-ui lint",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0"
   }
 }
-

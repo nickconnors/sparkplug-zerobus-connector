@@ -126,7 +126,7 @@ class ConfirmedWriter:
                 self._batch = await self._take()
             except asyncio.CancelledError:
                 raise
-            except Exception as e:  # noqa: BLE001 - e.g. the queue's disk spool: retried, the task must not end
+            except Exception as e:  # noqa: BLE001 - retried, the task must not end
                 self._idle = False
                 self._take_failed = True
                 self._failed("taking rows from the queue", e)
@@ -310,7 +310,7 @@ def convert_rows(records: Any, to_record: Callable[[dict[str, Any]], dict[str, A
 async def take_from_backpressure(backpressure: Any, to_record: Callable[[dict[str, Any]], dict[str, Any]],
                                  max_rows: int, linger_s: float, max_wait_s: float,
                                  on_bad_row: Callable[[Any, Exception], None] | None = None) -> list[dict[str, Any]]:
-    """A batch from the connector's BackpressureManager (memory queue, then disk spool): waits up to
+    """A batch from the connector's BackpressureManager (its memory queue): waits up to
     ``max_wait_s`` for the first record, then up to ``linger_s`` for the batch to fill. A record
     ``to_record`` fails on is left out (``convert_rows``)."""
     batch: list[dict[str, Any]] = []

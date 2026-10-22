@@ -162,16 +162,16 @@ async def test_a_primary_host_started_before_zerobus_waits_offline_for_its_write
     await bridge.stop()
 
 
-async def test_without_confirmed_writes_a_sparkplug_table_still_has_them_and_the_host_follows_it(tmp_path, acked, hosts):
+async def test_a_host_started_before_zerobus_follows_its_table_s_writer(tmp_path, acked, hosts):
     cfg = bridge_config(tmp_path)
-    cfg["zerobus"].update({"enabled": False, "confirmed_writes": False})
+    cfg["zerobus"].update({"enabled": False})
     cfg["sources"] = [sparkplug_source()]
     bridge = unified_bridge.UnifiedBridge(cfg)
     await bridge.start()
     supervisor = bridge.host_supervisors["sp"]
     assert await supervisor.tick() == "OFFLINE"            # no writer yet: nothing is stored
     await bridge.start_zerobus()
-    assert TARGET in bridge.writers                         # the table gets Sparkplug rows: confirmed writes
+    assert TARGET in bridge.writers
     await wait_for(lambda: bridge.writers[TARGET].status().last_success is not None)
     assert await supervisor.tick() == "ONLINE"
     await bridge.stop()
@@ -187,7 +187,7 @@ async def test_a_raw_table_name_the_nbirth_caller_cant_use_doesnt_stop_zerobus(t
     bridge = unified_bridge.UnifiedBridge(cfg)
     await bridge.start()
     assert (await bridge.start_zerobus())["status"] == "ok"
-    assert len(bridge.writers) == 1 and len(bridge.batch_tasks) == 1     # Zerobus runs either way
+    assert len(bridge.writers) == 1 and len(bridge.writer_tasks) == 1     # Zerobus runs either way
     assert ("sp" in bridge.birth_notifiers) is calls      # a hyphen is fine (quoted); a backquote isn't
     await bridge.stop()
 
@@ -262,7 +262,7 @@ async def test_the_reconnect_backoff_grows_unless_the_session_ran_a_while(monkey
     connects = []
 
     class Flaky:
-        protocol_type, primary_host_id, endpoint = ProtocolType.MQTT, None, "mqtt://localhost:1883"
+        protocol_type, primary_host_id, endpoint = ProtocolType.SPARKPLUG, None, "mqtt://localhost:1883"
 
         async def connect(self):
             connects.append(1)
@@ -279,9 +279,9 @@ async def test_the_reconnect_backoff_grows_unless_the_session_ran_a_while(monkey
 
     monkeypatch.setattr(unified_bridge, "create_protocol_client", lambda *a, **k: Flaky())
     monkeypatch.setattr(unified_bridge, "HEALTHY_SESSION_S", 0.05)
-    bridge = unified_bridge.UnifiedBridge({"sources": [{"name": "m", "protocol": "mqtt", "endpoint": "mqtt://localhost:1883"}],
-                                           "zerobus": {"enabled": False}, "normalization": {"enabled": False},
-                                           "backpressure": {"disk_spool": {"enabled": False, "encryption": False}}})
+    bridge = unified_bridge.UnifiedBridge({"sources": [{"name": "m", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883"}],
+                                           "zerobus": {"enabled": False},
+                                           "backpressure": {}})
     bridge.reconnect_initial_delay_sec, bridge.reconnect_multiplier, bridge.reconnect_max_delay_sec = 0.01, 2.0, 10.0
     await bridge.start()
     await asyncio.sleep(0.6)

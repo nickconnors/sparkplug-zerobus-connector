@@ -1,7 +1,7 @@
 """Sparkplug B source: one ``sparkplug_raw`` row per Sparkplug message from an MQTT server (e.g. Chariot).
 
-Connects and subscribes like the MQTT source (endpoint, credentials and TLS as in ``mqtt_client.py``),
-keeps each payload as bytes and hands a ``RawRow`` (``unified_connector.sparkplug.raw_row``) to the
+Connects to the MQTT server (``mqtt://host:port`` or ``mqtts://host:port``; credentials and TLS through
+``mqtt_security.py``), subscribes (QoS 0 by default), keeps each payload as bytes and hands a ``RawRow`` (``unified_connector.sparkplug.raw_row``) to the
 bridge, which writes it unchanged.
 
 With ``primary_host_id`` it is the edges' Sparkplug **primary host application** (``sparkplug/host.py``):
@@ -21,8 +21,8 @@ from typing import Any, Callable
 
 import aiomqtt
 
-from unified_connector.protocols.base import ProtocolType
-from unified_connector.protocols.mqtt_client import MQTTClient
+from unified_connector.protocols.base import ProtocolClient, ProtocolType
+from unified_connector.protocols.mqtt_security import MQTTSecurityManager, create_security_config_from_dict
 from unified_connector.sparkplug.host import V2, V3, is_online_state, state_payload, state_topic
 from unified_connector.sparkplug.raw_row import Outcome, RawRow, Skip, convert
 
@@ -34,7 +34,7 @@ STATE_PUBLISH_TIMEOUT_S = 5.0
 CONNECT_TIMEOUT_S = 10.0
 
 
-class SparkplugClient(MQTTClient):
+class SparkplugClient(ProtocolClient):
     """MQTT client that turns Sparkplug B messages into ``sparkplug_raw`` rows (optionally the primary host)."""
 
     def __init__(
@@ -45,12 +45,19 @@ class SparkplugClient(MQTTClient):
         on_record: Callable[[RawRow], None],
         on_stats: Callable[[dict[str, Any]], None] | None = None,
     ):
-        config = {**config}
-        config.setdefault("topics", list(DEFAULT_TOPICS))
-        config.setdefault("qos", 0)                   # Sparkplug publishes at QoS 0
-        config["normalization_enabled"] = False       # rows are stored unchanged
         super().__init__(source_name, endpoint, config, on_record, on_stats)
-        self._normalizer = None
+        self.host, self.port, self.use_tls = parse_endpoint(endpoint)
+        topics = config.get("topics") or list(DEFAULT_TOPICS)
+        self.topics: list[str] = [topics] if isinstance(topics, str) else list(topics)
+        self.qos = int(config.get("qos", 0))          # Sparkplug publishes at QoS 0
+        self.client_id = config.get("client_id", f"dbx-{source_name}")
+        self.username = config.get("username")
+        self.password = config.get("password")
+        self.keepalive = int(config.get("keepalive", 60))
+        # TLS (mqtts:// or security.use_tls) and credentials: protocols/mqtt_security.py
+        self.security_config = create_security_config_from_dict({**config, "endpoint": endpoint})
+        self.security_manager = MQTTSecurityManager(self.security_config)
+        self._client: aiomqtt.Client | None = None
         self.counters: Counter[str] = Counter()
         self.subscribed = asyncio.Event()
 
@@ -178,7 +185,6 @@ class SparkplugClient(MQTTClient):
 
     def handle_message(self, topic: str, payload: bytes, received_at_ms: int) -> Outcome:
         """One MQTT message: a row for the bridge, or a counted skip."""
-        self._last_data_time = time.time()
         self.counters["messages_received"] += 1
         outcome = convert(topic, payload, received_at_ms)
         if outcome.row is not None:
@@ -211,10 +217,19 @@ class SparkplugClient(MQTTClient):
         and the bridge calls this before it reconnects (seen 2026-10-06 when the test broker restarted)."""
         self.online = False
         try:
-            await asyncio.wait_for(super().disconnect(), DISCONNECT_TIMEOUT_S)
+            await asyncio.wait_for(self._close(), DISCONNECT_TIMEOUT_S)
         except asyncio.TimeoutError:
             logger.warning("[%s] MQTT disconnect took over %.0f s; dropping the connection", self.source_name, DISCONNECT_TIMEOUT_S)
             self._client = None
+
+    async def _close(self) -> None:
+        if self._client is not None:
+            try:
+                await self._client.__aexit__(None, None, None)
+            except Exception:  # noqa: BLE001 - the connection is going away either way
+                pass
+            finally:
+                self._client = None
 
     async def stop(self) -> None:
         """OFFLINE (primary host) and disconnect. The bridge calls this on shutdown and also to clean up after
@@ -222,6 +237,23 @@ class SparkplugClient(MQTTClient):
         later subscription at its first message: found 2026-10-06 when Chariot was restarted). The bridge's
         own shutdown flag ends its reconnect loop."""
         await self.go_offline()
+
+
+def parse_endpoint(endpoint: str) -> tuple[str, int, bool]:
+    """(host, port, TLS) of ``mqtt://host:port`` or ``mqtts://host:port`` (no scheme: mqtt; default ports
+    1883 and 8883)."""
+    endpoint = endpoint.strip()
+    use_tls = endpoint.startswith("mqtts://")
+    if endpoint.startswith(("mqtts://", "mqtt://")):
+        endpoint = endpoint.split("://", 1)[1]
+    default_port = 8883 if use_tls else 1883
+    if ":" in endpoint:
+        host, port = endpoint.rsplit(":", 1)
+        try:
+            return host, int(port), use_tls
+        except ValueError:
+            return endpoint, default_port, use_tls
+    return endpoint, default_port, use_tls
 
 
 def _matches(topic_filter: str, topic: str) -> bool:

@@ -297,7 +297,7 @@ async def test_finish_gives_up_after_its_timeout_while_writes_fail(setup):
 
 
 async def test_take_from_backpressure_fills_a_batch_and_waits_for_the_first_record():
-    bp = BackpressureManager({"disk_spool": {"enabled": False, "encryption": False}})
+    bp = BackpressureManager({})
     assert await take_from_backpressure(bp, dict, 10, 0.05, 0.05) == []
     for i in range(3):
         await bp.enqueue({"n": i})
@@ -327,7 +327,7 @@ async def test_take_from_backpressure_keeps_the_rows_taken_before_the_queue_fail
 
 
 async def test_take_from_backpressure_leaves_out_a_record_it_cant_convert():
-    bp = BackpressureManager({"disk_spool": {"enabled": False, "encryption": False}})
+    bp = BackpressureManager({})
     for i in range(3):
         await bp.enqueue({"n": i, "msg_topic": f"t{i}"})
     bad = []
@@ -409,13 +409,12 @@ async def test_bridge_writes_sparkplug_rows_through_the_confirmed_writer(monkeyp
 
     monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
     bridge = unified_bridge.UnifiedBridge({
-        "sources": [],
-        "zerobus": {"enabled": True, "confirmed_writes": True, "zerobus_endpoint": "https://example.zerobus",
+        "sources": [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True}],
+        "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c",
                                        "schema": "s", "table": "sparkplug_raw"}},
-        "normalization": {"enabled": False},
-        "backpressure": {"disk_spool": {"enabled": False, "encryption": False}},
+        "backpressure": {},
     })
     await bridge.start_infra()
     try:

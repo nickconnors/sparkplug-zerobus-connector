@@ -192,11 +192,11 @@ async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_
     bridge = unified_bridge.UnifiedBridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": f"mqtt://127.0.0.1:{mosquitto}",
                      "client_id": "d1-test", "primary_host_id": HOST_ID, "offline_after_seconds": 2, "online_after_seconds": 2}],
-        "zerobus": {"enabled": True, "confirmed_writes": True, "zerobus_endpoint": "https://example.zerobus",
+        "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c", "schema": "s",
                                        "table": "sparkplug_raw"}},
-        "normalization": {"enabled": False}, "backpressure": {"disk_spool": {"enabled": False, "encryption": False}},
+        "backpressure": {},
     })
     topic, payload, _ = transmission_messages()[0]
     await bridge.start()

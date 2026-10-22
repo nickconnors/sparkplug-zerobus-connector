@@ -1,40 +1,36 @@
-# The connector's configuration: one file for every protocol. Copy it, then:
+# The connector's configuration. Copy it, then:
 #   1. Set the environment variables it reads: ZEROBUS_ENDPOINT (<workspace-id>.zerobus.<region>.cloud.databricks.com),
 #      DATABRICKS_HOST (https://<workspace>.cloud.databricks.com), DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET
-#      (a service principal with USE CATALOG, USE SCHEMA, MODIFY and SELECT on the target tables), and the
-#      passwords of the sources you use. Never write a secret into this file.
-#   2. Under sources:, set enabled: true on the example sources you need (all are off) and fill in your
-#      endpoints, or delete the others; add more sources of any protocol the same way.
-#   3. Set zerobus.default_target to your table (and a source's target_table for a table of its own).
+#      (a service principal with USE CATALOG, USE SCHEMA, MODIFY and SELECT on the target table), and the MQTT
+#      server's: SPARKPLUG_MQTT_ENDPOINT, SPARKPLUG_MQTT_USERNAME, SPARKPLUG_MQTT_PASSWORD. Never write a secret
+#      into this file.
+#   2. Set zerobus.default_target to your sparkplug_raw table.
+#   3. Under sources:, set enabled: true on the example source (it is off), and primary_host_id if the connector
+#      is the edges' primary host; add more sources the same way (a source's target_table: a table of its own).
 # Run: python -m unified_connector --config <your copy>. The web page's source and ZeroBus edits are saved
 # back into the file it was started with, placeholders kept.
-connector:
-  name: Unified OT Zerobus Connector Client
-  log_level: INFO
-  log_file: /tmp/unified_connector.log
 bridge:
   autostart: true
 web_ui:
   enabled: true
   host: 0.0.0.0
   port: 8001
-  auto_open_browser: false
-  authentication:
+  authentication:                  # login to the web page, off by default
     enabled: false
-    method: client_cert
+    method: oauth2                 # oauth2 (a Databricks workspace's OAuth) or client_cert (needs tls)
     require_mfa: false
     oauth:
       provider: databricks
       client_id: ''
       client_secret: ''
       workspace_host: '${env:DATABRICKS_HOST:}'
-      redirect_uri: http://localhost:8082/login/callback
+      redirect_uri: http://localhost:8001/login/callback
       scopes:
       - all-apis
     session:
       secret_key: ''
       max_age_seconds: 28800
-      cookie_name: unified_connector_session
+      cookie_name: sparkplug_connector_session
       secure: false
       httponly: true
       samesite: lax
@@ -67,11 +63,8 @@ web_ui:
         admin: admin
         operator: operator
         viewer: viewer
-        client-admin: admin
-        client-operator: operator
-        client-viewer: viewer
       default_role: viewer
-  tls:
+  tls:                             # HTTPS for the web page, off by default
     enabled: false
     common_name: localhost
     san_list:
@@ -85,74 +78,23 @@ web_ui:
       max_age: 31536000
       include_subdomains: true
       preload: false
-    require_client_cert: true
-discovery:
-  enabled: true
-  network:
-    scan_enabled: true
-    scan_interval_sec: 300
-    subnets:
-    - 127.0.0.1/32
-    - 192.168.20.0/24
-  opcua:
-    enabled: true
-    default_port: 4840
-    vendor_ports:
-    - 4841
-    - 49320
-    - 4897
-    timeout_sec: 5.0
-  mqtt:
-    enabled: true
-    default_port: 1883
-    default_tls_port: 8883
-    timeout_sec: 3.0
-  modbus:
-    enabled: true
-    default_tcp_port: 502
-    alt_tcp_port: 5020
-    timeout_sec: 2.0
+    require_client_cert: false
 sources:
-# OPC-UA: polls (or subscribes to) the server's variables; here with its own numeric compression
-- name: opcua-example
-  protocol: opcua
-  enabled: false
-  endpoint: opc.tcp://127.0.0.1:4841/ot-simulator/server/
-  security_mode: None
-  normalization_enabled: true
-  subscription_mode: false
-  polling_interval_ms: 5000
-  variable_limit: 300
-  publishing_interval_ms: 1000
-  numeric_compression:
-    mode: sdt
-    change_only: true
-    sdt_deviation: 0.15
-    sdt_max_interval_ms: 300000
-# MQTT: plain topics (for Sparkplug B topics use the sparkplug source below)
-- name: mqtt-example
-  protocol: mqtt
-  enabled: false
-  endpoint: mqtt://127.0.0.1:1883
-  normalization_enabled: true
-  subscription_mode: true
-# Modbus TCP
-- name: modbus-example
-  protocol: modbus
-  enabled: false
-  endpoint: modbus://127.0.0.1:5020
-  normalization_enabled: true
-# Sparkplug B: one row per message in a table of its own (target_table; its columns differ from the other
-# protocols'), optionally the edges' primary host and a procedure call per NBIRTH (unified_connector/sparkplug/README.md)
+# One row per Sparkplug B message in sparkplug_raw; optionally the edges' primary host and a procedure call
+# per NBIRTH (unified_connector/sparkplug/README.md)
 - name: sparkplug-example
   protocol: sparkplug
   enabled: false
-  endpoint: '${env:SPARKPLUG_MQTT_ENDPOINT:mqtt://localhost:1883}'
-  target_table: bridge_stage_db.stage_db.sparkplug_raw
+  endpoint: '${env:SPARKPLUG_MQTT_ENDPOINT:mqtt://localhost:1883}'   # mqtts://host:8883 for TLS
+  # target_table: catalog.schema.table   # a table of its own; without it the default_target below
   client_id: databricks-sparkplug
   username: '${env:SPARKPLUG_MQTT_USERNAME:}'
   password: '${env:SPARKPLUG_MQTT_PASSWORD:}'
-  primary_host_id: ''              # the edges' Primary Host ID, e.g. databricks-zerobus; empty: not a primary host
+  # security:                      # TLS settings (protocols/mqtt_security.py)
+  #   ca_cert_path: /certs/ca.pem
+  #   client_cert_path: /certs/client.pem
+  #   client_key_path: /certs/client.key
+  primary_host_id: ''              # the edges' Primary Host ID, e.g. databricks-zerobus; empty: a plain subscriber
   state_format: v3
   offline_after_seconds: 30
   online_after_seconds: 30
@@ -161,98 +103,30 @@ sources:
     warehouse_id: ''
     procedures: [bridge_node_db.stage_db.create_edge_node_schema]
     schema_prefix: nb
-normalization:
-  enabled: true
-  path_template: '{site}/{area}/{line}/{equipment}/{signal_type}/{tag_name}'
-  default_context:
-    site: plant1
-    area: production
-    line: line1
-    equipment: default
-  quality_mapping:
-    opcua:
-      good:
-      - 0
-      uncertain:
-      - 64
-      - 65
-      - 66
-      bad:
-      - 128
-      - 129
-      - 130
-    mqtt:
-      good:
-      - online
-      - connected
-      bad:
-      - offline
-      - disconnected
-    modbus:
-      good:
-      - 0
-      bad:
-      - 1
-      - 2
-      - 3
-      - 4
 zerobus:
   enabled: true
   workspace_host: '${env:DATABRICKS_HOST}'
   zerobus_endpoint: '${env:ZEROBUS_ENDPOINT}'
   default_target:                  # the table of every source without a target_table of its own
     workspace_host: '${env:DATABRICKS_HOST}'
-    catalog: opcua
-    schema: scada_data
-    table: opcua_events_bronze
+    catalog: bridge_stage_db
+    schema: stage_db
+    table: sparkplug_raw
   auth:
     # or the encrypted credential store: ${credential:zerobus.client_id} / ${credential:zerobus.client_secret}
     # (python -m unified_connector.core.credential_manager store ...)
     client_id: '${env:DATABRICKS_CLIENT_ID}'
     client_secret: '${env:DATABRICKS_CLIENT_SECRET}'
-  confirmed_writes: false          # true: every table's batches are kept until Zerobus acknowledges them
-                                   # (a table with Sparkplug rows always has them)
-  wal:                             # a write-ahead log for the confirmed-writes tables (rows survive a crash)
+  drain_timeout_seconds: 15        # on shutdown: how long the queued rows may take to be written
+  wal:                             # a write-ahead log per table (rows survive a crash)
     enabled: false
     path: wal
+    fsync_interval_seconds: 0.2
   batch:
-    max_records: 1000
-    timeout_seconds: 5.0
+    max_records: 500
+    linger_seconds: 0.2
   source_targets: {}
-  proxy:
-    enabled: false
-    use_env_vars: true
-    http_proxy: ''
-    https_proxy: ''
-    no_proxy: localhost,127.0.0.1
-numeric_compression:
-  mode: sdt
-  change_only: true
-  deadband: 0.0
-  sdt_deviation: 0.25
-  sdt_max_interval_ms: 600000
-  sdt_min_interval_ms: 0
-  rules:
-  - tag_path_regex: .*temperature.*
-    mode: sdt
-    sdt_deviation: 0.2
-    sdt_max_interval_ms: 300000
-  - tag_path_regex: .*status.*
-    mode: change_only
 backpressure:
-  max_queue_size: 50000
-  drop_policy: oldest
-  disk_spool:
-    enabled: true
-    directory: ./spool
-    max_size_mb: 500
-    compression: gzip
-credentials:
-  storage:
-    type: encrypted
-    file: ~/.unified_connector/credentials.enc
-performance:
-  max_concurrent_connections: 100
-  connection_pool_size: 20
-  read_buffer_size: 8192
-  write_buffer_size: 8192
+  memory_queue:                    # per table; a primary host goes OFFLINE at 80% full
+    max_size: 100000
+    drop_policy: oldest            # oldest, newest or reject

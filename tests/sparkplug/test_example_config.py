@@ -1,6 +1,6 @@
-"""The one example configuration (unified_connector/config/config.yaml): every protocol's example source is
-off, so the connector starts nothing and opens only the default table; a disabled source's table is opened
-once it is enabled and started."""
+"""The example configuration (unified_connector/config/config.yaml): its one Sparkplug source is off, so the
+connector starts nothing and opens no table; a disabled source's table is opened once it is enabled and
+started."""
 from __future__ import annotations
 
 import pathlib
@@ -16,24 +16,6 @@ ENV = {"ZEROBUS_ENDPOINT": "123.zerobus.region.cloud.databricks.com", "DATABRICK
        "DATABRICKS_CLIENT_ID": "id", "DATABRICKS_CLIENT_SECRET": "secret"}
 
 
-class FakeZeroBusClient:
-    def __init__(self, cfg):
-        z = cfg["zerobus"]
-        t = z["target"]
-        self.full_table_name = f"{t['catalog']}.{t['schema']}.{t['table']}"
-        self.zerobus_endpoint, self.workspace_url = z["zerobus_endpoint"], z["workspace_host"]
-        self.client_id, self.client_secret = z["auth"]["client_id"], z["auth"]["client_secret"]
-
-    async def connect(self):
-        pass
-
-    async def close(self):
-        pass
-
-    def get_metrics(self):
-        return {}
-
-
 class FakeRowStreams:
     def __init__(self, *args):
         self.streams = FakeStreams()
@@ -46,32 +28,34 @@ def example(monkeypatch, tmp_path) -> dict:
     for k, v in ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("HOME", str(tmp_path))      # the credential manager's directory
-    monkeypatch.chdir(tmp_path)                    # spool and log paths
-    monkeypatch.setattr(unified_bridge, "ZeroBusClient", FakeZeroBusClient)
+    monkeypatch.chdir(tmp_path)                    # log and write-ahead log paths
     monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
     return ConfigLoader(config_path=EXAMPLE).load()
 
 
-def test_the_example_has_one_source_per_protocol_all_off_and_no_workspace_values():
+def test_the_example_has_one_sparkplug_source_off_and_no_workspace_values_or_secrets():
     config = ConfigLoader(config_path=EXAMPLE).load_raw()
-    assert sorted((s["protocol"], s["enabled"]) for s in config["sources"]) == [
-        ("modbus", False), ("mqtt", False), ("opcua", False), ("sparkplug", False)]
+    assert [(s["protocol"], s["enabled"]) for s in config["sources"]] == [("sparkplug", False)]
+    source = config["sources"][0]
+    assert source["endpoint"].startswith("${env:SPARKPLUG_MQTT_ENDPOINT")
+    assert source["username"].startswith("${env:") and source["password"].startswith("${env:")
     zerobus = config["zerobus"]
     assert zerobus["zerobus_endpoint"] == "${env:ZEROBUS_ENDPOINT}"
     assert zerobus["workspace_host"] == zerobus["default_target"]["workspace_host"] == "${env:DATABRICKS_HOST}"
     assert zerobus["auth"] == {"client_id": "${env:DATABRICKS_CLIENT_ID}", "client_secret": "${env:DATABRICKS_CLIENT_SECRET}"}
-    assert "monitoring" not in config     # its health_check/prometheus ports were never served
+    for gone in ("monitoring", "discovery", "normalization", "numeric_compression"):
+        assert gone not in config
+    assert "disk_spool" not in config["backpressure"] and "confirmed_writes" not in zerobus
     hosts = re.findall(r"[\w<>.-]+\.cloud\.databricks\.com", EXAMPLE.read_text())
     assert hosts and all("<" in h for h in hosts), hosts   # placeholders only, no real workspace
 
 
-async def test_the_example_starts_no_source_and_opens_only_the_default_table(monkeypatch, tmp_path, started):  # noqa: F811
+async def test_the_example_starts_no_source_and_opens_no_table(monkeypatch, tmp_path, started):  # noqa: F811
     bridge = unified_bridge.UnifiedBridge(example(monkeypatch, tmp_path))
     await bridge.start()
     try:
         assert started == [] and bridge.clients == {}
-        assert list(bridge.zerobus_clients) == ["example.opcua.scada_data.opcua_events_bronze"]
-        assert bridge.writers == {}     # before: the disabled sparkplug-example's table got a confirmed writer
+        assert bridge.tables == {} and bridge.writers == {}
     finally:
         await bridge.stop()
 

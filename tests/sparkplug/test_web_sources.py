@@ -21,20 +21,12 @@ PACKAGE_CONFIG = pathlib.Path(unified_bridge.__file__).resolve().parents[1] / "c
 CONFIG = """\
 # Header: the environment variables this file reads (kept on save)
 # SPTEST_PASSWORD, SPTEST_ENDPOINT, SPTEST_ENS
-connector:
-  name: test
 web_ui:
   enabled: true
   host: 127.0.0.1
   port: {port}
   authentication:
     enabled: false
-normalization:
-  enabled: false
-backpressure:
-  disk_spool:
-    enabled: false
-    encryption: false
 zerobus:
   enabled: false
 sources:
@@ -56,7 +48,7 @@ sources:
     procedures: [a.b.create_edge_node_schema]
     schema_prefix: nb
 - name: m
-  protocol: mqtt
+  protocol: sparkplug
   enabled: true
   endpoint: mqtt://localhost:1883
   username: viewer
@@ -116,7 +108,7 @@ async def page(tmp_path, monkeypatch, started):
     config = ConfigLoader(config_path=path).load()
     bridge = unified_bridge.UnifiedBridge(config)
     await bridge.start()
-    server = WebServer(config=config, bridge=bridge, discovery=None, config_path=path)
+    server = WebServer(config=config, bridge=bridge, config_path=path)
     await server.start()
     async with aiohttp.ClientSession(f"http://127.0.0.1:{port}") as http:
         yield http, path, bridge
@@ -236,12 +228,11 @@ def confirmed_bridge(monkeypatch, source):
     monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
     return unified_bridge.UnifiedBridge({
         "sources": [source],
-        "zerobus": {"enabled": True, "confirmed_writes": True, "zerobus_endpoint": "https://example.zerobus",
+        "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c",
                                        "schema": "s", "table": "t"}},
-        "normalization": {"enabled": False},
-        "backpressure": {"disk_spool": {"enabled": False, "encryption": False}},
+        "backpressure": {},
     })
 
 

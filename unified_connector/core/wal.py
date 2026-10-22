@@ -10,8 +10,9 @@ Layout: segment files ``wal-<first seq>.log`` (one line per row: ``<seq> <crc32 
 and ``checkpoint`` (every row up to this sequence is done). Each row reaches the OS when appended (a
 process crash loses nothing); the file is fsynced every ``fsync_interval_s`` off the event loop (a power
 loss loses at most that). Segments are deleted once all their rows are done. Rows can be done out of
-order (the queue's disk spool reorders), so the checkpoint is the highest sequence below which nothing is
-outstanding; after a crash, rows done above it are written again (same ``msg_id``: at least once).
+order (a row the queue refuses, drop_policy newest or reject, is done before the rows queued ahead of it),
+so the checkpoint is the highest sequence below which nothing is outstanding; after a crash, rows done
+above it are written again (same ``msg_id``: at least once).
 """
 from __future__ import annotations
 

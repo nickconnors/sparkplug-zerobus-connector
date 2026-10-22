@@ -64,11 +64,10 @@ async def test_rows_land_in_the_table_equal_to_java_tahu(broker):
     target = dict(zip(("catalog", "schema", "table"), TABLE.split(".")))
     bridge = UnifiedBridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "live-test"}],
-        "zerobus": {"enabled": True, "confirmed_writes": True, "zerobus_endpoint": env["ZEROBUS_ENDPOINT"],
+        "zerobus": {"enabled": True, "zerobus_endpoint": env["ZEROBUS_ENDPOINT"],
                     "auth": {"client_id": env["DATABRICKS_CLIENT_ID"], "client_secret": env["DATABRICKS_CLIENT_SECRET"]},
                     "default_target": {"workspace_host": env["DATABRICKS_HOST"], **target}},
-        "normalization": {"enabled": False},
-        "backpressure": {"disk_spool": {"enabled": False, "encryption": False}},
+        "backpressure": {},
     })
     messages = transmission_messages()
     started = int(time.time() * 1000)

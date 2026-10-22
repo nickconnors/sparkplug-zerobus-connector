@@ -14,10 +14,10 @@ import aiomqtt
 import pytest
 
 from conftest import EXPECTED, FIXTURES
-from unified_connector.core.unified_bridge import SPARKPLUG_RAW, UnifiedBridge
+from unified_connector.core.unified_bridge import UnifiedBridge
 from unified_connector.protocols import sparkplug_client
 from unified_connector.protocols.factory import create_protocol_client
-from unified_connector.protocols.sparkplug_client import SparkplugClient
+from unified_connector.protocols.sparkplug_client import SparkplugClient, parse_endpoint
 from unified_connector.sparkplug.raw_row import COLUMNS, RawRow, convert
 
 TRANSMISSION = FIXTURES / "transmission"
@@ -94,7 +94,26 @@ def test_factory_makes_a_sparkplug_client():
     assert isinstance(c, SparkplugClient)
     assert c.protocol_type.value == "sparkplug"
     assert (c.topics, c.qos, c.client_id) == (["spBv1.0/#"], 0, "eval")
-    assert c._normalizer is None
+    assert (c.host, c.port, c.use_tls) == ("chariot", 1883, False)
+
+
+@pytest.mark.parametrize("endpoint, expected", [
+    ("mqtt://chariot:1883", ("chariot", 1883, False)),
+    ("mqtts://chariot:8883", ("chariot", 8883, True)),
+    ("mqtts://chariot", ("chariot", 8883, True)),
+    ("chariot", ("chariot", 1883, False)),
+    ("10.0.0.5:1884", ("10.0.0.5", 1884, False)),
+])
+def test_the_endpoint_gives_host_port_and_tls(endpoint, expected):
+    assert parse_endpoint(endpoint) == expected
+    c = create_protocol_client("sparkplug", "s", endpoint, {}, on_record=lambda r: None)
+    assert c.security_config.use_tls is expected[2]
+
+
+def test_factory_refuses_other_protocols():
+    for protocol in ("mqtt", "opcua", "modbus"):
+        with pytest.raises(ValueError, match="Unsupported protocol"):
+            create_protocol_client(protocol, "s", "mqtt://chariot:1883", {}, on_record=lambda r: None)
 
 
 def test_handle_message_hands_on_rows_and_counts_skips():
@@ -183,8 +202,7 @@ async def test_bridge_queues_sparkplug_rows_with_the_sparkplug_raw_columns(broke
     bridge = UnifiedBridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "bridge-test"}],
         "zerobus": {"enabled": False},
-        "normalization": {"enabled": True},          # must not touch Sparkplug rows
-        "backpressure": {"disk_spool": {"enabled": False, "encryption": False}},
+        "backpressure": {},
     })
     await bridge.start()
     try:
@@ -198,17 +216,16 @@ async def test_bridge_queues_sparkplug_rows_with_the_sparkplug_raw_columns(broke
         await bridge.stop()
     assert all(c._client is None for c in bridge.clients.values())          # disconnected
     queued = [bridge.backpressure.memory_queue.get_nowait() for _ in range(len(messages))]
-    assert all(q["_record_kind"] == SPARKPLUG_RAW for q in queued)
     written = [bridge._to_zerobus_message(q) for q in queued]
     assert all(tuple(w) == COLUMNS for w in written)
     assert sorted((w["msg_topic"], w["msg"]) for w in written) == sorted((t, j) for t, _, j in messages)
     assert all(w["inserted_at"].isdigit() and w["namespace"] == "spBv1.0" for w in written)
-    assert bridge.metrics["vendor_formats"]["sparkplug_b"] == len(messages)
+    assert bridge.metrics["records_received"] == len(messages)
 
 
 def test_bridge_writes_a_row_unchanged():
-    bridge = UnifiedBridge({"sources": [], "zerobus": {"enabled": False}, "normalization": {"enabled": False},
-                            "backpressure": {"disk_spool": {"enabled": False, "encryption": False}}})
+    bridge = UnifiedBridge({"sources": [], "zerobus": {"enabled": False},
+                            "backpressure": {}})
     row = convert("spBv1.0/Plant1/NDEATH/Line A", (TRANSMISSION / "ndeath-1.bin").read_bytes(), 1790694245123).row
     bridge._on_record(row)
     assert bridge._to_zerobus_message(bridge.backpressure.memory_queue.get_nowait()) == row.to_zerobus_record()
@@ -221,8 +238,8 @@ async def test_source_reconnects_and_receives_again_after_the_connection_drops(b
     endpoint, port = broker
     bridge = UnifiedBridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "drop-test"}],
-        "zerobus": {"enabled": False}, "normalization": {"enabled": False},
-        "backpressure": {"disk_spool": {"enabled": False, "encryption": False}},
+        "zerobus": {"enabled": False},
+        "backpressure": {},
     })
     topic, payload, _ = transmission_messages()[0]
     await bridge.start()

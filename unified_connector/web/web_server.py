@@ -1,11 +1,9 @@
-"""Web UI Server for Unified Connector.
+"""The connector's web server: REST API and web page.
 
-Provides REST API and web interface for:
-- Protocol server discovery and configuration
-- ZeroBus target configuration
-- Data flow monitoring
-- Credential management
-- OAuth2 authentication and RBAC (NIS2 compliance)
+- Sparkplug B sources: add, edit, remove, start, stop
+- ZeroBus target configuration and diagnostics
+- Status, metrics and the Sparkplug health
+- Optional login (OAuth2) with role-based permissions
 """
 
 import asyncio
@@ -77,19 +75,17 @@ def _edited(entry: Dict[str, Any], current: Dict[str, Any], form: Dict[str, Any]
 class WebServer:
     """Web server for configuration and monitoring."""
 
-    def __init__(self, config: Dict[str, Any], bridge, discovery, config_path: Optional[Path] = None):
+    def __init__(self, config: Dict[str, Any], bridge, config_path: Optional[Path] = None):
         """Initialize web server.
 
         Args:
             config: Application configuration
             bridge: UnifiedBridge instance
-            discovery: DiscoveryService instance
             config_path: the file the connector was started with (source changes are saved there;
                 None: the package's default config.yaml)
         """
         self.config = config
         self.bridge = bridge
-        self.discovery = discovery
         self.config_path = Path(config_path) if config_path else None
 
         web_ui_config = config.get('web_ui', {})
@@ -148,12 +144,6 @@ class WebServer:
             web.get('/api/auth/permissions', self.get_user_permissions),
             web.get('/api/auth/roles', self.get_role_info),
 
-            # Discovery
-            web.get('/api/discovery/servers', self.get_discovered_servers),
-            web.post('/api/discovery/scan', self.trigger_discovery_scan),
-            web.post('/api/discovery/test', self.test_server_connection),
-
-            # Sources
             web.get('/api/sources', self.get_sources),
             web.post('/api/sources', self.add_source),
             web.delete('/api/sources/{name}', self.remove_source),
@@ -177,7 +167,6 @@ class WebServer:
             web.get('/api/metrics', self.get_metrics),
             web.get('/api/sparkplug/health', self.get_sparkplug_health),
             web.get('/api/status', self.get_status),
-            web.get('/api/diagnostics/pipeline', self.get_pipeline_diagnostics),
 
             # Health
             web.get('/health', self.health_check),
@@ -230,73 +219,6 @@ class WebServer:
     # API Handlers
 
     @require_permission(Permission.READ)
-    async def get_discovered_servers(self, request: web.Request) -> web.Response:
-        """Get list of discovered protocol servers."""
-        protocol = request.query.get('protocol')
-
-        proto_enum = None
-        if protocol:
-            try:
-                from unified_connector.core.discovery import ProtocolType
-                proto_enum = ProtocolType(protocol)
-            except Exception:
-                proto_enum = None
-
-        servers = self.discovery.get_discovered_servers(protocol=proto_enum)
-
-        return web.json_response({
-            'servers': [s.to_dict() for s in servers],
-            'count': len(servers)
-        })
-
-    @require_permission(Permission.WRITE)
-    async def trigger_discovery_scan(self, request: web.Request) -> web.Response:
-        """Trigger immediate discovery scan."""
-        try:
-            asyncio.create_task(self.discovery.discover_all())
-            return web.json_response({'status': 'ok', 'message': 'Discovery scan started'})
-        except Exception as e:
-            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
-
-    @require_permission(Permission.READ)
-    async def test_server_connection(self, request: web.Request) -> web.Response:
-        """Test connection to a specific server."""
-        try:
-            data = await request.json()
-            protocol = data.get('protocol')
-            host = data.get('host')
-            port = data.get('port')
-
-            if not all([protocol, host, port]):
-                return web.json_response(
-                    {'status': 'error', 'message': 'Missing required fields: protocol, host, port'},
-                    status=400
-                )
-
-            # Validate input (NIS2 compliance - prevent injection attacks)
-            try:
-                protocol = validate_protocol(protocol)
-                host = validate_host(host)
-                port = validate_port(port)
-            except ValidationError as e:
-                return web.json_response(
-                    {'status': 'error', 'message': f'Validation error: {str(e)}'},
-                    status=400
-                )
-
-            try:
-                from unified_connector.core.discovery import ProtocolType
-                protocol_enum = ProtocolType(str(protocol))
-            except Exception:
-                return web.json_response({"status": "error", "message": f"Unknown protocol: {protocol}"}, status=400)
-
-            result = await self.discovery.test_server_connection(protocol_enum, host, port)
-            return web.json_response(result)
-
-        except Exception as e:
-            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
-
-    @require_permission(Permission.READ)
     async def get_sources(self, request: web.Request) -> web.Response:
         """Get configured data sources (passwords and secrets masked)."""
         sources = self.bridge.sources if self.bridge is not None else self.config.get('sources', [])
@@ -337,8 +259,8 @@ class WebServer:
                     status=400
                 )
 
-            # Sparkplug rows and other rows can't share a table (core/targets.py)
-            conflicts = self.bridge.target_conflicts(self.bridge.sources + [data])
+            # a target_table that isn't catalog.schema.table (core/targets.py)
+            conflicts = self.bridge.target_errors(self.bridge.sources + [data])
             if conflicts:
                 return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
 
@@ -407,7 +329,7 @@ class WebServer:
             if current is None:
                 return web.json_response({'status': 'error', 'message': f"Source not found: {source_name}"}, status=404)
             edited = _edited(current, current, data)
-            conflicts = self.bridge.target_conflicts([edited if s is current else s for s in self.bridge.sources])
+            conflicts = self.bridge.target_errors([edited if s is current else s for s in self.bridge.sources])
             if conflicts:   # Sparkplug rows and other rows can't share a table (core/targets.py)
                 return web.json_response({'status': 'error', 'message': conflicts[0]}, status=400)
             await self.bridge.update_source(source_name, edited)
@@ -615,24 +537,13 @@ class WebServer:
 
         if deep:
             try:
-                from unified_connector.core.zerobus_client import ZeroBusClient
+                from unified_connector.core.confirmed_writer import ZerobusRowStreams
 
-                zb_config = {
-                    'zerobus': {
-                        'enabled': True,
-                        'workspace_host': workspace_host,
-                        'zerobus_endpoint': zerobus_endpoint,
-                        'target': table,
-                        'auth': auth,
-                        'batch': cfg.get('batch', {}),
-                        'retry': cfg.get('retry', {}),
-                        'circuit_breaker': cfg.get('circuit_breaker', {}),
-                    }
-                }
-
-                client = ZeroBusClient(zb_config)
-                await asyncio.wait_for(client.connect(protobuf_descriptor=None), timeout=12.0)
-                await client.close()
+                streams = ZerobusRowStreams(zerobus_endpoint, workspace_host,
+                                            f"{table['catalog']}.{table['schema']}.{table['table']}",
+                                            auth.get('client_id', ''), auth.get('client_secret', ''))
+                stream = await asyncio.wait_for(streams.open(), timeout=12.0)
+                await stream.close()
                 checks['deep_stream_create_ok'] = True
             except Exception as e:
                 checks['deep_stream_create_ok'] = False
@@ -795,39 +706,11 @@ class WebServer:
             return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
     @require_permission(Permission.READ)
-    async def get_pipeline_diagnostics(self, request: web.Request) -> web.Response:
-        """Get message transformation pipeline diagnostics.
-
-        GET /api/diagnostics/pipeline
-
-        Returns sample messages at each transformation stage.
-        """
-        try:
-            diagnostics = self.bridge.get_pipeline_diagnostics()
-            return web.json_response(diagnostics)
-        except Exception as e:
-            logger.error(f"Failed to get pipeline diagnostics: {e}", exc_info=True)
-            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
-
-    @require_permission(Permission.READ)
     async def get_status(self, request: web.Request) -> web.Response:
         """Get connector status."""
         try:
             status = self.bridge.get_status()
 
-            # Add discovery stats (discovered servers are *reachable*, not necessarily configured/connected)
-            try:
-                servers = self.discovery.get_discovered_servers()
-                status['discovery_enabled'] = True
-                status['discovery_count'] = len(servers)
-                by_proto = {}
-                for s in servers:
-                    proto = getattr(s, 'protocol', None)
-                    key = proto.value if hasattr(proto, 'value') else str(proto)
-                    by_proto[key] = by_proto.get(key, 0) + 1
-                status['discovery_by_protocol'] = by_proto
-            except Exception:
-                status['discovery_enabled'] = False
             return web.json_response(status)
         except Exception as e:
             logger.error(f"Failed to get status: {e}", exc_info=True)

@@ -58,7 +58,8 @@ def test_done_rows_are_not_replayed_and_their_segments_go(tmp_path):
 
 
 def test_the_checkpoint_waits_for_rows_done_out_of_order(tmp_path):
-    """The queue's disk spool can hand out a later row first: the checkpoint only passes rows with nothing
+    """A row the queue refuses (drop_policy newest or reject) is done before the rows queued ahead of it: the
+    checkpoint only passes rows with nothing
     outstanding before them; rows done above it are written again after a crash (at least once)."""
     log = WriteAheadLog(tmp_path)
     log.open()
@@ -178,17 +179,17 @@ async def test_appends_are_fsynced_on_a_timer(tmp_path, monkeypatch):
 # ----------------------------------------------------------------------------- the bridge
 
 def bridge_config(tmp_path, max_queue: int = 1000) -> dict:
+    """One enabled Sparkplug source on the default table (its table is opened; start_infra() starts no source,
+    and nothing listens at its endpoint)."""
     return {
-        "sources": [],
-        "zerobus": {"enabled": True, "confirmed_writes": True, "zerobus_endpoint": "https://example.zerobus",
+        "sources": [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True}],
+        "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c",
                                        "schema": "s", "table": "sparkplug_raw"},
                     "wal": {"enabled": "true", "path": str(tmp_path / "wal"), "fsync_interval_seconds": 0.05},
                     "batch": {"linger_seconds": 0.02}, "drain_timeout_seconds": 5},
-        "normalization": {"enabled": False},
-        "backpressure": {"memory_queue": {"max_size": max_queue, "drop_policy": "oldest"},
-                         "disk_spool": {"enabled": False, "encryption": False}},
+        "backpressure": {"memory_queue": {"max_size": max_queue, "drop_policy": "oldest"}},
     }
 
 
@@ -209,7 +210,7 @@ def fake_streams(monkeypatch):
 
 async def crash(bridge):
     """Stops the bridge's tasks without its stop(): nothing drained, no OFFLINE, logs only closed."""
-    tasks = [*bridge.batch_tasks.values(), *bridge.wal_tasks.values(), *bridge.host_tasks.values()]
+    tasks = [*bridge.writer_tasks.values(), *bridge.wal_tasks.values(), *bridge.host_tasks.values()]
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -271,8 +272,7 @@ async def test_more_rows_to_replay_than_the_queue_holds_are_all_written_first(tm
     log.open()
     sent = rows("A", 10)
     for r in sent:                                          # as the bridge logs a Sparkplug row
-        log.append({"_record_kind": unified_bridge.SPARKPLUG_RAW, "vendor_format": "sparkplug_b",
-                    "protocol": "sparkplug", **r.to_zerobus_record()})
+        log.append(r.to_zerobus_record())
     log.close()                                            # a crash with 10 rows not acknowledged
 
     cfg = bridge_config(tmp_path, max_queue=3)
@@ -309,7 +309,7 @@ async def test_a_row_the_log_cant_write_is_still_queued_and_written(tmp_path, fa
 
 
 async def test_rows_of_a_take_cancelled_part_way_are_written_by_the_next_writer(tmp_path, fake_streams):
-    """The writer task cancelled during a take (e.g. stop_zerobus after its wait, while a spool file is read): the
+    """The writer task cancelled during a take (e.g. stop_zerobus after its wait): the
     rows it had taken from the queue were lost, and done in the log with the next writer's acknowledgement."""
     bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
     target = "example.c.s.sparkplug_raw"
@@ -318,7 +318,7 @@ async def test_rows_of_a_take_cancelled_part_way_are_written_by_the_next_writer(
 
     async def slow_after_the_first():
         if one_taken.is_set():
-            await asyncio.Event().wait()                    # e.g. reading a spool file: cancelled here
+            await asyncio.Event().wait()                    # a slow take: cancelled here
         record = await real()
         if record is not None:
             one_taken.set()
@@ -328,7 +328,7 @@ async def test_rows_of_a_take_cancelled_part_way_are_written_by_the_next_writer(
     sent = rows("A", 1)
     bridge._on_record(sent[0])
     await asyncio.wait_for(one_taken.wait(), 5)
-    task = bridge.batch_tasks[target]
+    task = bridge.writer_tasks[target]
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     queue.dequeue = real
@@ -351,7 +351,7 @@ async def test_rows_the_queue_drops_are_done_in_the_log(tmp_path, fake_streams):
 
 
 async def test_a_row_the_queue_fails_to_take_is_dropped_and_done_in_the_log(tmp_path, fake_streams):
-    """The slow path's spool failing (e.g. a full disk): the error left the enqueue task, so the row was lost and
+    """The slow path's enqueue failing unexpectedly: the error left the enqueue task, so the row was lost and
     outstanding in the log for good (the checkpoint stopped there: every later row replayed at each start)."""
     fake_streams.fail_opens = 10**6                       # nothing drains: the memory queue stays full
     bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path, max_queue=1))
@@ -390,31 +390,14 @@ async def test_rows_the_queue_rejects_are_done_in_the_log(tmp_path, fake_streams
     await bridge.stop()
 
 
-async def test_the_log_is_only_for_tables_with_confirmed_writes(tmp_path, fake_streams, monkeypatch):
-    """confirmed_writes off: only a table that gets Sparkplug rows has confirmed writes, and so a log."""
-    class OriginalPath:
-        def __init__(self, cfg):
-            t = cfg["zerobus"]["target"]
-            self.full_table_name = f"{t['catalog']}.{t['schema']}.{t['table']}"
-            self.zerobus_endpoint, self.workspace_url, self.client_id, self.client_secret = "e", "w", "id", "s"
-
-        async def connect(self):
-            pass
-
-        async def close(self):
-            pass
-
-    monkeypatch.setattr(unified_bridge, "ZeroBusClient", OriginalPath)
+async def test_only_the_enabled_sources_tables_are_opened_each_with_a_log(tmp_path, fake_streams):
     cfg = bridge_config(tmp_path)
-    cfg["zerobus"]["confirmed_writes"] = False
-    # enabled (a disabled source's table isn't opened); start_infra() starts no source
-    cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883", "enabled": True,
+    cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True,
                        "target_table": "c.s.sparkplug_raw_2"},
-                      {"name": "m", "protocol": "mqtt", "endpoint": "mqtt://localhost:1883", "enabled": True}]
+                      {"name": "off", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": False}]
     bridge = unified_bridge.UnifiedBridge(cfg)
     await bridge.start_infra()
     try:
-        assert sorted(bridge.zerobus_clients) == ["example.c.s.sparkplug_raw", "example.c.s.sparkplug_raw_2"]
-        assert list(bridge.writers) == ["example.c.s.sparkplug_raw_2"] == list(bridge.wals)
+        assert list(bridge.tables) == list(bridge.writers) == list(bridge.wals) == ["example.c.s.sparkplug_raw_2"]
     finally:
         await bridge.stop()
