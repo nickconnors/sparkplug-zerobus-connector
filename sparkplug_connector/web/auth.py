@@ -12,7 +12,7 @@ Supports:
 import logging
 import os
 from typing import Dict, Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from aiohttp import web
 from aiohttp_session import setup as setup_session, get_session, new_session
@@ -30,6 +30,8 @@ from cryptography import fernet
 from sparkplug_connector.web.databricks_oauth import DatabricksOAuthClient, generate_state
 
 logger = logging.getLogger(__name__)
+
+PENDING_LOGINS = 5      # logins in progress per browser session (each its own OAuth state)
 
 
 class AuthenticationManager:
@@ -239,12 +241,19 @@ class AuthenticationManager:
         """
         # For Databricks OAuth, use custom client
         if self.provider == 'databricks':
+            # The session cookie must be set on the host the provider sends the user back to (the redirect URI's):
+            # a login started on another name of the same server (127.0.0.1 vs localhost) moves there first
+            callback = urlsplit(self.redirect_uri)
+            if callback.netloc and request.host != callback.netloc:
+                return web.HTTPFound(f"{callback.scheme}://{callback.netloc}/login")
+
             # Generate state for CSRF protection
             state = generate_state()
 
-            # Store state in session
-            session = await new_session(request)
-            session['oauth_state'] = state
+            # Store state in session: the last few, so a second login (another tab, a retry) doesn't invalidate
+            # one still in progress
+            session = await get_session(request)
+            session['oauth_states'] = (list(session.get('oauth_states') or []) + [state])[-PENDING_LOGINS:]
 
             # Get authorization URL
             auth_url = self.oauth_client.get_authorization_url(state)
@@ -276,12 +285,14 @@ class AuthenticationManager:
                 if not code:
                     return web.Response(text="Missing authorization code", status=400)
 
-                # Verify state (CSRF protection)
+                # Verify state (CSRF protection): one this browser's session started, used once
                 session = await get_session(request)
-                expected_state = session.get('oauth_state')
-                if state != expected_state:
-                    logger.warning(f"OAuth state mismatch: expected={expected_state}, got={state}")
+                pending = list(session.get('oauth_states') or [])
+                if not state or state not in pending:
+                    logger.warning(f"OAuth state mismatch: {len(pending)} pending in this session, got={state}")
                     return web.Response(text="Invalid OAuth state (CSRF check failed)", status=403)
+                pending.remove(state)
+                session['oauth_states'] = pending
 
                 # Exchange code for token
                 token_data = await self.oauth_client.exchange_code_for_token(code)
@@ -289,15 +300,9 @@ class AuthenticationManager:
                     return web.Response(text="Failed to exchange authorization code", status=500)
 
                 access_token = token_data.get('access_token')
-                id_token = token_data.get('id_token')
 
-                # Get user info
+                # Get user info (the workspace checks the token)
                 userinfo = await self.oauth_client.get_user_info(access_token)
-                if not userinfo:
-                    # Fallback: decode ID token
-                    if id_token:
-                        userinfo = self.oauth_client.decode_id_token(id_token)
-
                 if not userinfo:
                     return web.Response(text="Failed to get user information", status=500)
 
@@ -366,13 +371,15 @@ class AuthenticationManager:
 
     async def handle_logout(self, request: web.Request) -> web.Response:
         """
-        Handle logout - clear session and redirect to login.
+        Handle logout - clear session.
 
         Args:
             request: aiohttp Request
 
         Returns:
-            Redirect response to login page
+            JSON for the web UI's fetch (a redirect would end at the provider, which fetch can't follow); for a
+            browser form, a redirect to the login page (not /login, which would sign the user in again at once
+            while the provider's own session lasts)
         """
         session = await get_session(request)
         user_email = session.get('user', {}).get('email', 'unknown')
@@ -382,7 +389,9 @@ class AuthenticationManager:
 
         logger.info(f"User {user_email} logged out")
 
-        return web.HTTPFound('/login')
+        if 'text/html' in request.headers.get('Accept', ''):
+            return web.HTTPFound('/static/login.html')
+        return web.json_response({'status': 'ok', 'message': 'Logged out'})
 
     async def get_auth_status(self, request: web.Request) -> web.Response:
         """
@@ -474,12 +483,11 @@ async def auth_middleware(request: web.Request, handler):
         # Not authenticated
         logger.debug(f"Unauthenticated access attempt to {request.path}")
 
-        # For API requests, return 401
-        if request.path.startswith('/api/'):
-            raise web.HTTPUnauthorized(reason="Authentication required")
-
-        # For browser requests, redirect to login
-        return web.HTTPFound('/login')
+        # A page load is redirected to the login; anything else (the API, the browser's favicon or script
+        # requests) gets 401: a redirect there would start another login and replace the one in progress
+        if request.method == 'GET' and not request.path.startswith('/api/') and 'text/html' in request.headers.get('Accept', ''):
+            return web.HTTPFound('/login')
+        raise web.HTTPUnauthorized(reason="Authentication required")
 
     # Recreate User object and attach to request
     from sparkplug_connector.web.rbac import User, Role

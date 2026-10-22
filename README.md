@@ -136,14 +136,23 @@ cd webui && npm ci && npm run build
 ### Login (off by default)
 
 `web_ui.authentication.enabled: true` puts every page and API call (except `/health`) behind a login,
-with three roles (`admin`, `operator`, `viewer`; `rbac.role_mappings` maps the identity provider's groups to
-them). With `method: oauth2` and `provider: databricks` the login is a Databricks workspace's OAuth
-(an OAuth app connection with the redirect URL `http(s)://<connector>:8001/login/callback`); its client id
-and secret come from `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` or the file, the session key from
-`SESSION_SECRET_KEY` (`python -c "import secrets; print(secrets.token_urlsafe(32))"`). The `azure`, `okta`
-and `google` providers need authlib's aiohttp client, which current authlib releases don't include.
-`method: client_cert` takes the role from a client certificate (needs `web_ui.tls` with
-`require_client_cert: true`).
+with three roles: `admin` (everything), `operator` (add, edit, start and stop sources and Zerobus; no deletes, no ZeroBus settings), `viewer` (read only).
+
+With `method: oauth2` and `provider: databricks` the login is a Databricks workspace's OAuth:
+
+1. An account admin adds an **app connection** (account console → Settings → App connections): redirect URL
+   `http(s)://<connector host>:<port>/login/callback`, scope *All APIs*, with a client secret.
+2. Set `oauth.workspace_host` and `oauth.redirect_uri` (the same URL) in the config, the client id and secret in
+   `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`, and a session key in `SESSION_SECRET_KEY`
+   (`python -c "import secrets; print(secrets.token_urlsafe(32))"`).
+3. `rbac.role_mappings` maps the user's **workspace groups** to roles (e.g. `admins: admin`); anyone else gets
+   `default_role`. The user and the groups come from the workspace's SCIM `Me` with the user's token.
+
+Open the UI on the redirect URL's host name (a login started on another name is moved there first). Logout
+ends the connector's session; signing in again is immediate while the browser is still signed in to
+Databricks. The `azure`, `okta` and `google` providers need authlib's aiohttp client, which current authlib
+releases don't include. `method: client_cert` takes the role from a client certificate (needs `web_ui.tls`
+with `require_client_cert: true`).
 
 ### HTTPS (off by default)
 

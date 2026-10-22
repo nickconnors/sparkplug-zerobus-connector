@@ -21,6 +21,8 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   });
 
   if (resp.status === 401) {
+    // signed out (or the session expired): to the login page, once, instead of an error per request
+    if (!window.location.pathname.startsWith("/static/login.html")) window.location.assign("/static/login.html");
     throw new AuthRequiredError("Authentication required");
   }
 

@@ -4,7 +4,9 @@ Databricks OAuth2 Integration for aiohttp.
 Custom implementation that doesn't rely on authlib.integrations.aiohttp_client
 (which is not available in authlib 1.6+).
 
-Uses direct HTTP requests for OAuth2 authorization code flow.
+Uses direct HTTP requests for OAuth2 authorization code flow. The user comes from the workspace's SCIM ``Me``
+endpoint with the access token (the workspace has no OIDC userinfo endpoint): the workspace checks the token,
+and the answer includes the user's workspace groups for the role mapping.
 """
 
 import logging
@@ -14,8 +16,6 @@ from urllib.parse import urlencode
 
 import aiohttp
 from aiohttp import web
-from authlib.oauth2.rfc6749 import OAuth2Token
-from authlib.jose import jwt
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class DatabricksOAuthClient:
         # Databricks OAuth endpoints
         self.authorization_endpoint = f"{self.workspace_host}/oidc/v1/authorize"
         self.token_endpoint = f"{self.workspace_host}/oidc/v1/token"
-        self.userinfo_endpoint = f"{self.workspace_host}/oidc/v1/userinfo"
+        self.userinfo_endpoint = f"{self.workspace_host}/api/2.0/preview/scim/v2/Me"
 
         logger.info(f"Databricks OAuth client initialized: workspace={workspace_host}")
 
@@ -113,13 +113,13 @@ class DatabricksOAuthClient:
 
     async def get_user_info(self, access_token: str) -> Optional[Dict[str, Any]]:
         """
-        Get user information from Databricks.
+        Get user information from Databricks (SCIM ``Me``).
 
         Args:
             access_token: OAuth access token
 
         Returns:
-            User info dict or None on failure
+            ``email``, ``name`` and ``groups`` (workspace group names), or None on failure
         """
         try:
             async with aiohttp.ClientSession() as session:
@@ -132,32 +132,24 @@ class DatabricksOAuthClient:
                         logger.error(f"User info request failed ({resp.status}): {error_text}")
                         return None
 
-                    user_info = await resp.json()
-                    logger.info(f"Retrieved user info: {user_info.get('email', 'unknown')}")
+                    user_info = scim_user(await resp.json())
+                    logger.info(f"Retrieved user info: {user_info.get('email') or 'unknown'}")
                     return user_info
 
         except Exception as e:
             logger.error(f"Error getting user info: {e}")
             return None
 
-    def decode_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """
-        Decode ID token (JWT) to get user claims.
 
-        Args:
-            id_token: JWT ID token
-
-        Returns:
-            Decoded claims dict or None on failure
-        """
-        try:
-            # Decode without verification (for now - in production verify signature)
-            claims = jwt.decode(id_token, None, options={"verify_signature": False})
-            logger.info("Decoded ID token claims")
-            return claims
-        except Exception as e:
-            logger.error(f"Error decoding ID token: {e}")
-            return None
+def scim_user(me: Dict[str, Any]) -> Dict[str, Any]:
+    """A SCIM ``Me`` answer as ``email`` (the user name, else the primary email), ``name`` and ``groups``."""
+    emails = me.get('emails') or []
+    primary = next((e.get('value') for e in emails if e.get('primary')), None) or (emails[0].get('value') if emails else None)
+    return {
+        'email': me.get('userName') or primary,
+        'name': me.get('displayName') or me.get('userName') or primary,
+        'groups': [g.get('display') for g in me.get('groups') or [] if g.get('display')],
+    }
 
 
 def generate_state() -> str:
