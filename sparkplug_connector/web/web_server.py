@@ -17,17 +17,17 @@ import aiohttp_cors
 from typing import Callable
 
 # Authentication and authorization (off by default)
-from unified_connector.web.auth import AuthenticationManager, auth_middleware
-from unified_connector.web.rbac import (
+from sparkplug_connector.web.auth import AuthenticationManager, auth_middleware
+from sparkplug_connector.web.rbac import (
     require_permission, require_role, Permission, Role, get_role_info
 )
-from unified_connector.web.security_headers import (
+from sparkplug_connector.web.security_headers import (
     security_headers_middleware, log_security_headers_status
 )
-from unified_connector.web.input_validation import validate_source_config, validate_source_name, ValidationError
-from unified_connector.web.correlation_middleware import correlation_id_middleware
-from unified_connector.core.structured_logging import get_structured_logger
-from unified_connector.core.tls_manager import create_ssl_context_from_config
+from sparkplug_connector.web.input_validation import validate_source_config, validate_source_name, ValidationError
+from sparkplug_connector.web.correlation_middleware import correlation_id_middleware
+from sparkplug_connector.core.structured_logging import get_structured_logger
+from sparkplug_connector.core.tls_manager import create_ssl_context_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ NO_UI_HTML = """<!DOCTYPE html>
 <body style="font-family: sans-serif; margin: 2em">
 <h1>Sparkplug Zerobus connector</h1>
 <p>The web UI isn't built into this copy: run <code>npm ci &amp;&amp; npm run build</code> in <code>webui/</code>
-(it builds into <code>unified_connector/web/static/connector-ui/</code>), then restart the connector.</p>
+(it builds into <code>sparkplug_connector/web/static/connector-ui/</code>), then restart the connector.</p>
 <p>The API works without it: <a href="/health">/health</a>, <a href="/api/status">/api/status</a>,
 <a href="/api/sparkplug/health">/api/sparkplug/health</a>.</p>
 </body></html>
@@ -88,7 +88,7 @@ class WebServer:
 
         Args:
             config: Application configuration
-            bridge: UnifiedBridge instance
+            bridge: Bridge instance
             config_path: the file the connector was started with (source changes are saved there;
                 None: the package's default config.yaml)
         """
@@ -233,7 +233,7 @@ class WebServer:
     def _save_sources(self, change) -> None:
         """Applies ``change`` (sources -> sources) to the sources in the file the connector was started
         with, as written there: ``${env:...}``/``${credential:...}`` placeholders stay placeholders."""
-        from unified_connector.core.config_loader import ConfigLoader
+        from sparkplug_connector.core.config_loader import ConfigLoader
         config_loader = ConfigLoader(config_path=self.config_path)
         config = config_loader.load_raw()
         config['sources'] = change(list(config.get('sources') or []))
@@ -388,7 +388,7 @@ class WebServer:
         import os
         import socket
         from urllib.parse import urlparse
-        from unified_connector.core.credential_manager import CredentialManager
+        from sparkplug_connector.core.credential_manager import CredentialManager
 
         deep = request.query.get('deep', '').lower() in ('1', 'true', 'yes')
 
@@ -534,7 +534,7 @@ class WebServer:
 
         if deep:
             try:
-                from unified_connector.core.confirmed_writer import ZerobusRowStreams
+                from sparkplug_connector.core.confirmed_writer import ZerobusRowStreams
 
                 streams = ZerobusRowStreams(zerobus_endpoint, workspace_host,
                                             f"{table['catalog']}.{table['schema']}.{table['table']}",
@@ -558,7 +558,7 @@ class WebServer:
             data = await request.json()
 
             # Store credentials securely
-            from unified_connector.core.credential_manager import CredentialManager
+            from sparkplug_connector.core.credential_manager import CredentialManager
             cred_manager = CredentialManager()
 
             auth_in = (data.get('auth') or {}) if isinstance(data, dict) else {}
@@ -588,7 +588,7 @@ class WebServer:
 
             # Update config file (IMPORTANT: load raw to avoid persisting injected secrets): the file the
             # connector was started with, as written there (${env:...} placeholders stay placeholders)
-            from unified_connector.core.config_loader import ConfigLoader
+            from sparkplug_connector.core.config_loader import ConfigLoader
             config_loader = ConfigLoader(config_path=self.config_path, credential_manager=cred_manager)
             config_raw = config_loader.load_raw()
 

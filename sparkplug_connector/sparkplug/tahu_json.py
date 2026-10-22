@@ -28,8 +28,8 @@ from typing import Any
 
 from google.protobuf.message import DecodeError
 
-from unified_connector.sparkplug import sparkplug_b_decode_pb2 as pb   # strings as bytes: see _utf8
-from unified_connector.sparkplug.java_format import (
+from sparkplug_connector.sparkplug import sparkplug_b_decode_pb2 as pb   # strings as bytes: see _utf8
+from sparkplug_connector.sparkplug.java_format import (
     java_hashmap_order,
     java_utf8_decode,
     json_double,

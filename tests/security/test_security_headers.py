@@ -7,7 +7,7 @@ Tests that all required security headers are present in responses.
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from unified_connector.web.security_headers import security_headers_middleware
+from sparkplug_connector.web.security_headers import security_headers_middleware
 
 
 @pytest.fixture

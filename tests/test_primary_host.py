@@ -18,8 +18,8 @@ import pytest
 
 from test_confirmed_writer import FakeStreams
 from test_sparkplug_source import transmission_messages, wait_for
-from unified_connector.core import unified_bridge
-from unified_connector.protocols.sparkplug_client import SparkplugClient
+from sparkplug_connector.core import bridge as core_bridge
+from sparkplug_connector.protocols.sparkplug_client import SparkplugClient
 
 HOST_ID = "test-host"
 STATE_V3 = f"spBv1.0/STATE/{HOST_ID}"
@@ -188,8 +188,8 @@ async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_
         async def open(self):
             return await streams.open()
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
-    bridge = unified_bridge.UnifiedBridge({
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
+    bridge = core_bridge.Bridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": f"mqtt://127.0.0.1:{mosquitto}",
                      "client_id": "d1-test", "primary_host_id": HOST_ID, "offline_after_seconds": 2, "online_after_seconds": 2}],
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",

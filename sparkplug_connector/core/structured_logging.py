@@ -125,7 +125,7 @@ class StructuredLogger:
             'source_ip': source_ip or 'unknown',
 
             # Application context
-            'application': 'unified-ot-connector',
+            'application': 'sparkplug-zerobus-connector',
             'component': extra_fields.pop('component', 'unknown'),
             'action': extra_fields.pop('action', 'unknown'),
             'result': extra_fields.pop('result', 'unknown'),
@@ -381,6 +381,6 @@ def get_structured_logger() -> StructuredLogger:
     """
     global _structured_logger
     if _structured_logger is None:
-        logger = logging.getLogger('unified_connector.security')
+        logger = logging.getLogger('sparkplug_connector.security')
         _structured_logger = StructuredLogger(logger)
     return _structured_logger

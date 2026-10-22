@@ -9,10 +9,10 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from unified_connector.core.config_loader import ConfigLoader
-from unified_connector.core.unified_bridge import UnifiedBridge
-from unified_connector.web.web_server import WebServer
-from unified_connector.core.advanced_logging import (
+from sparkplug_connector.core.config_loader import ConfigLoader
+from sparkplug_connector.core.bridge import Bridge
+from sparkplug_connector.web.web_server import WebServer
+from sparkplug_connector.core.advanced_logging import (
     LogRotationConfig,
     configure_advanced_logging,
     get_logging_manager
@@ -31,11 +31,11 @@ logging_manager = configure_advanced_logging(log_config)
 logger = logging.getLogger(__name__)
 
 
-class UnifiedConnector:
+class Connector:
     """Main application orchestrator."""
 
     def __init__(self, config_path: str = None):
-        """Initialize unified connector.
+        """Initialize the connector.
 
         Args:
             config_path: Path to config.yaml (optional)
@@ -45,7 +45,7 @@ class UnifiedConnector:
         self.config = self.config_loader.load()
 
         # Initialize components
-        self.bridge = UnifiedBridge(self.config)
+        self.bridge = Bridge(self.config)
         self.web_server = WebServer(
             config=self.config,
             bridge=self.bridge,
@@ -61,7 +61,7 @@ class UnifiedConnector:
         # Background log maintenance task
         self._log_maintenance_task: asyncio.Task | None = None
 
-        logger.info("✓ Unified Connector initialized")
+        logger.info("✓ Sparkplug Zerobus connector initialized")
 
     async def start(self):
         """Start all services."""
@@ -88,7 +88,7 @@ class UnifiedConnector:
         logger.info("✓ Log maintenance task started")
 
         logger.info("=" * 80)
-        logger.info("✓ Unified Connector is running")
+        logger.info("✓ Sparkplug Zerobus connector is running")
         logger.info("=" * 80)
 
         # Print connection info
@@ -126,7 +126,7 @@ class UnifiedConnector:
         # Stop web server
         await self.web_server.stop()
 
-        logger.info("✓ Unified Connector stopped")
+        logger.info("✓ Sparkplug Zerobus connector stopped")
 
     async def run(self):
         """Run the connector until interrupted."""
@@ -157,12 +157,13 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
+        prog="python -m sparkplug_connector",
         description="Sparkplug B (MQTT) to Databricks through Zerobus"
     )
     parser.add_argument(
         '--config',
         type=str,
-        help='Path to config.yaml (default: unified_connector/config/config.yaml)'
+        help='Path to config.yaml (default: sparkplug_connector/config/config.yaml)'
     )
     parser.add_argument(
         '--log-level',
@@ -178,7 +179,7 @@ def main():
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
     # Create and run connector
-    connector = UnifiedConnector(config_path=args.config)
+    connector = Connector(config_path=args.config)
 
     try:
         asyncio.run(connector.run())

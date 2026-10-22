@@ -17,15 +17,15 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from unified_connector.protocols.base import ProtocolClient
-from unified_connector.protocols.factory import create_protocol_client
-from unified_connector.core.backpressure import BackpressureManager
-from unified_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
-from unified_connector.core.wal import SEQ_FIELD, WriteAheadLog
-from unified_connector.core import targets as source_tables
-from unified_connector.sparkplug import raw_row
-from unified_connector.sparkplug.edge_node_schemas import BirthNotifier, DatabricksSql, nbirth_procedures, quoted_table
-from unified_connector.sparkplug.host import HostState, HostSupervisor
+from sparkplug_connector.protocols.base import ProtocolClient
+from sparkplug_connector.protocols.factory import create_protocol_client
+from sparkplug_connector.core.backpressure import BackpressureManager
+from sparkplug_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
+from sparkplug_connector.core.wal import SEQ_FIELD, WriteAheadLog
+from sparkplug_connector.core import targets as source_tables
+from sparkplug_connector.sparkplug import raw_row
+from sparkplug_connector.sparkplug.edge_node_schemas import BirthNotifier, DatabricksSql, nbirth_procedures, quoted_table
+from sparkplug_connector.sparkplug.host import HostState, HostSupervisor
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class TargetTable:
     client_secret: str
 
 
-class UnifiedBridge:
+class Bridge:
     """Sparkplug B sources to Databricks tables through Zerobus (one queue and one confirmed writer per table)."""
 
     def __init__(self, config: Dict[str, Any]):

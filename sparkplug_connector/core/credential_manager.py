@@ -33,17 +33,17 @@ class CredentialManager:
         """Initialize credential manager.
 
         Args:
-            credentials_dir: Directory for encrypted credentials (default: ~/.unified_connector)
+            credentials_dir: Directory for encrypted credentials (default: ~/.sparkplug_connector)
             master_password: Master password for encryption (or use CONNECTOR_MASTER_PASSWORD env var)
         """
         if credentials_dir is None:
-            credentials_dir = Path.home() / ".unified_connector"
+            credentials_dir = Path.home() / ".sparkplug_connector"
 
         self.credentials_dir = Path(credentials_dir)
         try:
             self.credentials_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError as e:
-            fallback_dir = Path.cwd() / ".unified_connector"
+            fallback_dir = Path.cwd() / ".sparkplug_connector"
             logger.warning(
                 f"Cannot access credentials dir {self.credentials_dir} ({e}). Falling back to {fallback_dir}."
             )
@@ -87,7 +87,7 @@ class CredentialManager:
             logger.info("Generated new salt for credential encryption")
 
         except PermissionError as e:
-            fallback_dir = Path.cwd() / ".unified_connector"
+            fallback_dir = Path.cwd() / ".sparkplug_connector"
             if self.credentials_dir.resolve() != fallback_dir.resolve():
                 logger.warning(
                     f"Permission error accessing {salt_file} ({e}). Falling back to {fallback_dir}."
@@ -307,7 +307,7 @@ if __name__ == '__main__':
     import getpass
 
     if len(sys.argv) < 2:
-        print("Unified Connector - Credential Manager CLI")
+        print("Sparkplug Zerobus connector - Credential Manager CLI")
         print("\nUsage:")
         print("  python credential_manager.py generate-password     - Generate secure master password")
         print("  python credential_manager.py store <key> <value>   - Store a credential")

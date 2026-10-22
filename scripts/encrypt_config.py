@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration File Encryption Tool for Unified OT Connector.
+Configuration File Encryption Tool for Sparkplug Zerobus Connector.
 
 This script provides a CLI for encrypting sensitive fields in configuration files.
 
@@ -19,7 +19,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from unified_connector.core.config_encryption import ConfigEncryption
+from sparkplug_connector.core.config_encryption import ConfigEncryption
 
 
 def main():
@@ -30,10 +30,10 @@ def main():
         epilog="""
 Examples:
   # Identify sensitive fields in configuration
-  python scripts/encrypt_config.py --identify unified_connector/config/config.yaml
+  python scripts/encrypt_config.py --identify sparkplug_connector/config/config.yaml
 
   # Encrypt sensitive fields
-  python scripts/encrypt_config.py --encrypt unified_connector/config/config.yaml
+  python scripts/encrypt_config.py --encrypt sparkplug_connector/config/config.yaml
 
   # Encrypt with custom output path
   python scripts/encrypt_config.py --encrypt config.yaml --output config.encrypted.yaml
@@ -150,7 +150,7 @@ NIS2 Compliance: Article 21.2(h) - Encryption at rest
                 print(f"   cat {output_path}")
                 print()
                 print("2. Test loading encrypted configuration:")
-                print(f"   python -c 'from unified_connector.core.config_loader import ConfigLoader; c = ConfigLoader(\"{output_path}\"); print(c.load())'")
+                print(f"   python -c 'from sparkplug_connector.core.config_loader import ConfigLoader; c = ConfigLoader(\"{output_path}\"); print(c.load())'")
                 print()
                 print("3. If verification successful, replace original:")
                 if not args.no_backup:

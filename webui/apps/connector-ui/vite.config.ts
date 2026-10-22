@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   base: "/static/connector-ui/",
   build: {
-    outDir: "../../../unified_connector/web/static/connector-ui",
+    outDir: "../../../sparkplug_connector/web/static/connector-ui",
     emptyOutDir: true,
   },
 });

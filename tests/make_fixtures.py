@@ -34,7 +34,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from payloads import u32, u64  # noqa: E402
-from unified_connector.sparkplug import sparkplug_b_pb2 as pb  # noqa: E402
+from sparkplug_connector.sparkplug import sparkplug_b_pb2 as pb  # noqa: E402
 
 OUT = HERE / "fixtures" / "transmission"
 GROUP, EDGE_NODE, DEVICE, GOLDEN_DEVICE = "Plant1", "Line A", "M100", "M200"

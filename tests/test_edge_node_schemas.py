@@ -8,7 +8,7 @@ import json
 import httpx
 import pytest
 
-from unified_connector.sparkplug.edge_node_schemas import (
+from sparkplug_connector.sparkplug.edge_node_schemas import (
     MAX_ATTEMPTS,
     Birth,
     BirthNotifier,

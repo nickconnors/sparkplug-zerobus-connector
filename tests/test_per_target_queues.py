@@ -6,8 +6,8 @@ import json
 
 from conftest import FIXTURES
 from test_confirmed_writer import FakeStreams
-from unified_connector.core import unified_bridge
-from unified_connector.sparkplug.raw_row import convert
+from sparkplug_connector.core import bridge as core_bridge
+from sparkplug_connector.sparkplug.raw_row import convert
 
 NDEATH = (FIXTURES / "transmission" / "ndeath-1.bin").read_bytes()
 
@@ -48,8 +48,8 @@ async def test_each_target_gets_only_its_sources_rows(monkeypatch, tmp_path):
         async def open(self):
             return await streams[self.table].open()
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
-    bridge = unified_bridge.UnifiedBridge(config(tmp_path))
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
+    bridge = core_bridge.Bridge(config(tmp_path))
     await bridge.start_infra()
     try:
         a, b = rows("A", 5), rows("B", 3)
@@ -85,8 +85,8 @@ async def test_a_source_s_records_go_to_its_target_s_queue(monkeypatch, tmp_path
         handed[source_name] = IdleClient(on_record)
         return handed[source_name]
 
-    monkeypatch.setattr(unified_bridge, "create_protocol_client", factory)
-    bridge = unified_bridge.UnifiedBridge(config(tmp_path))
+    monkeypatch.setattr(core_bridge, "create_protocol_client", factory)
+    bridge = core_bridge.Bridge(config(tmp_path))
     for name in ("a", "b"):
         await bridge._start_client({"name": name, "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883"})
     try:

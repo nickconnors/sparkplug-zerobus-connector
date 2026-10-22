@@ -1,4 +1,4 @@
-"""unified_connector.sparkplug.to_tahu_json against Java Eclipse Tahu (the JSON the connector writes).
+"""sparkplug_connector.sparkplug.to_tahu_json against Java Eclipse Tahu (the JSON the connector writes).
 
 Tests marked with the ``java_tahu`` fixture run Java Tahu on Java 17 through JPype and skip where it
 isn't available; the rest compare with outputs saved from it (``expected/``) or with fixed values.
@@ -19,8 +19,8 @@ from hypothesis import strategies as st
 import make_fixtures
 import payloads
 from conftest import EXPECTED, FIXTURES
-from unified_connector.sparkplug import TahuDecodeError, tahu_json, to_tahu_json
-from unified_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
+from sparkplug_connector.sparkplug import TahuDecodeError, tahu_json, to_tahu_json
+from sparkplug_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
 
 TRANSMISSION = sorted((FIXTURES / "transmission").glob("*.bin"))
 CASES = payloads.all_cases()

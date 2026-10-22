@@ -52,7 +52,7 @@ class EncryptionManager:
             EncryptionError: If neither password nor key file provided
         """
         self.master_password = master_password or os.getenv('CONNECTOR_MASTER_PASSWORD')
-        self.key_file = Path(key_file) if key_file else Path.home() / '.unified_connector' / 'encryption.key'
+        self.key_file = Path(key_file) if key_file else Path.home() / '.sparkplug_connector' / 'encryption.key'
         self._cipher = None
 
         if not self.master_password and not self.key_file.exists():

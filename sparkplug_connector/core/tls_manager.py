@@ -48,7 +48,7 @@ class TLSManager:
         Args:
             cert_dir: Directory for certificate storage
         """
-        self.cert_dir = cert_dir or Path.home() / '.unified_connector' / 'certs'
+        self.cert_dir = cert_dir or Path.home() / '.sparkplug_connector' / 'certs'
         self.cert_file = self.cert_dir / 'server.crt'
         self.key_file = self.cert_dir / 'server.key'
 
@@ -58,7 +58,7 @@ class TLSManager:
     def generate_self_signed_cert(
         self,
         common_name: str = "localhost",
-        organization: str = "Unified OT Connector",
+        organization: str = "Sparkplug Zerobus Connector",
         validity_days: int = 365,
         key_size: int = 2048,
         san_list: Optional[list] = None

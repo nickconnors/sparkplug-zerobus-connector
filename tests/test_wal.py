@@ -10,8 +10,8 @@ import pytest
 
 from test_confirmed_writer import FakeStreams, row
 from test_per_target_queues import rows, wait_for
-from unified_connector.core import unified_bridge, wal as wal_module
-from unified_connector.core.wal import SEQ_FIELD, WriteAheadLog
+from sparkplug_connector.core import bridge as core_bridge, wal as wal_module
+from sparkplug_connector.core.wal import SEQ_FIELD, WriteAheadLog
 
 
 def ids(records):
@@ -204,7 +204,7 @@ def fake_streams(monkeypatch):
         async def open(self):
             return await streams.open()
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
     return streams
 
 
@@ -220,7 +220,7 @@ async def crash(bridge):
 
 async def test_rows_queued_when_the_process_dies_are_written_after_the_restart(tmp_path, fake_streams):
     fake_streams.fail_opens = 10**6                       # Databricks unreachable: everything stays queued
-    first = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    first = core_bridge.Bridge(bridge_config(tmp_path))
     await first.start_infra()
     sent = rows("A", 4)
     for r in sent:
@@ -229,7 +229,7 @@ async def test_rows_queued_when_the_process_dies_are_written_after_the_restart(t
     await crash(first)
 
     fake_streams.fail_opens = 0
-    second = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    second = core_bridge.Bridge(bridge_config(tmp_path))
     await second.start_infra()
     later = rows("A", 1)
     second._on_record(later[0])
@@ -241,7 +241,7 @@ async def test_rows_queued_when_the_process_dies_are_written_after_the_restart(t
     assert status["rows_replayed"] == 4 and status["pending"] == 0 and status["checkpoint"] == 5
 
     batches = len(fake_streams.ingested)
-    third = unified_bridge.UnifiedBridge(bridge_config(tmp_path))      # after a clean stop: nothing to replay
+    third = core_bridge.Bridge(bridge_config(tmp_path))      # after a clean stop: nothing to replay
     await third.start_infra()
     await third.stop()
     assert third.get_metrics()["wal"]["example.c.s.sparkplug_raw"]["rows_replayed"] == 0
@@ -251,7 +251,7 @@ async def test_rows_queued_when_the_process_dies_are_written_after_the_restart(t
 
 async def test_a_batch_in_flight_when_the_process_dies_is_written_again(tmp_path, fake_streams):
     fake_streams.fail_waits = 10**6                       # sent, never acknowledged
-    first = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    first = core_bridge.Bridge(bridge_config(tmp_path))
     await first.start_infra()
     sent = rows("A", 3)
     for r in sent:
@@ -260,7 +260,7 @@ async def test_a_batch_in_flight_when_the_process_dies_is_written_again(tmp_path
     await crash(first)
 
     fake_streams.fail_waits, fake_streams.ingested = 0, []
-    second = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    second = core_bridge.Bridge(bridge_config(tmp_path))
     await second.start_infra()
     await second.stop()
     assert ids(json.loads(j) for batch in fake_streams.ingested for j in batch) == [r.msg_id for r in sent]
@@ -277,7 +277,7 @@ async def test_more_rows_to_replay_than_the_queue_holds_are_all_written_first(tm
 
     cfg = bridge_config(tmp_path, max_queue=3)
     cfg["backpressure"]["memory_queue"]["drop_policy"] = drop_policy
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start_infra()
     assert "example.c.s.sparkplug_raw" in bridge.writers   # set up despite the small queue
     later = rows("A", 1)
@@ -291,7 +291,7 @@ async def test_more_rows_to_replay_than_the_queue_holds_are_all_written_first(tm
 
 
 async def test_a_row_the_log_cant_write_is_still_queued_and_written(tmp_path, fake_streams, monkeypatch):
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
     await bridge.start_infra()
     sent = rows("A", 3)
     bridge._on_record(sent[0])
@@ -311,7 +311,7 @@ async def test_a_row_the_log_cant_write_is_still_queued_and_written(tmp_path, fa
 async def test_rows_of_a_take_cancelled_part_way_are_written_by_the_next_writer(tmp_path, fake_streams):
     """The writer task cancelled during a take (e.g. stop_zerobus after its wait): the
     rows it had taken from the queue were lost, and done in the log with the next writer's acknowledgement."""
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
     target = "example.c.s.sparkplug_raw"
     queue = bridge._queue(target)
     real, one_taken = queue.dequeue, asyncio.Event()
@@ -340,7 +340,7 @@ async def test_rows_of_a_take_cancelled_part_way_are_written_by_the_next_writer(
 
 async def test_rows_the_queue_drops_are_done_in_the_log(tmp_path, fake_streams):
     fake_streams.fail_opens = 10**6
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path, max_queue=2))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path, max_queue=2))
     await bridge.start_infra()
     for r in rows("A", 5):
         bridge._on_record(r)
@@ -354,7 +354,7 @@ async def test_a_row_the_queue_fails_to_take_is_dropped_and_done_in_the_log(tmp_
     """The slow path's enqueue failing unexpectedly: the error left the enqueue task, so the row was lost and
     outstanding in the log for good (the checkpoint stopped there: every later row replayed at each start)."""
     fake_streams.fail_opens = 10**6                       # nothing drains: the memory queue stays full
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path, max_queue=1))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path, max_queue=1))
     queue = bridge._queue("example.c.s.sparkplug_raw")
 
     async def broken(record):
@@ -376,7 +376,7 @@ async def test_rows_the_queue_rejects_are_done_in_the_log(tmp_path, fake_streams
     fake_streams.fail_opens = 2                           # ~3 s of backoff before the first take
     cfg = bridge_config(tmp_path, max_queue=2)
     cfg["backpressure"]["memory_queue"]["drop_policy"] = "reject"
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start_infra()
     sent = rows("A", 5)
     for r in sent:
@@ -395,7 +395,7 @@ async def test_only_the_enabled_sources_tables_are_opened_each_with_a_log(tmp_pa
     cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True,
                        "target_table": "c.s.sparkplug_raw_2"},
                       {"name": "off", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": False}]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start_infra()
     try:
         assert list(bridge.tables) == list(bridge.writers) == list(bridge.wals) == ["example.c.s.sparkplug_raw_2"]

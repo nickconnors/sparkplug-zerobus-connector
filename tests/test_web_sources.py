@@ -12,11 +12,11 @@ import pytest
 import yaml
 
 from test_confirmed_writer import FakeStreams
-from unified_connector.core import unified_bridge
-from unified_connector.core.config_loader import ConfigLoader
-from unified_connector.web.web_server import WebServer
+from sparkplug_connector.core import bridge as core_bridge
+from sparkplug_connector.core.config_loader import ConfigLoader
+from sparkplug_connector.web.web_server import WebServer
 
-PACKAGE_CONFIG = pathlib.Path(unified_bridge.__file__).resolve().parents[1] / "config" / "config.yaml"
+PACKAGE_CONFIG = pathlib.Path(core_bridge.__file__).resolve().parents[1] / "config" / "config.yaml"
 
 CONFIG = """\
 # Header: the environment variables this file reads (kept on save)
@@ -91,13 +91,13 @@ def started(monkeypatch):
         started.append((source_name, dict(config)))
         return IdleClient(config)
 
-    monkeypatch.setattr(unified_bridge, "create_protocol_client", factory)
+    monkeypatch.setattr(core_bridge, "create_protocol_client", factory)
     return started
 
 
 @pytest.fixture
 async def page(tmp_path, monkeypatch, started):
-    """The connector's web server and bridge on a config file, as ``python -m unified_connector --config``."""
+    """The connector's web server and bridge on a config file, as ``python -m sparkplug_connector --config``."""
     monkeypatch.setenv("HOME", str(tmp_path))                 # the credential manager's directory
     monkeypatch.setenv("SPTEST_PASSWORD", "s3cret")
     with socket.socket() as s:
@@ -106,7 +106,7 @@ async def page(tmp_path, monkeypatch, started):
     path = tmp_path / "connector.yaml"
     path.write_text(CONFIG.format(port=port))
     config = ConfigLoader(config_path=path).load()
-    bridge = unified_bridge.UnifiedBridge(config)
+    bridge = core_bridge.Bridge(config)
     await bridge.start()
     server = WebServer(config=config, bridge=bridge, config_path=path)
     await server.start()
@@ -225,8 +225,8 @@ def confirmed_bridge(monkeypatch, source):
         async def open(self):
             return await streams.open()
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
-    return unified_bridge.UnifiedBridge({
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
+    return core_bridge.Bridge({
         "sources": [source],
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
@@ -275,7 +275,7 @@ async def test_saving_the_zerobus_settings_goes_to_the_started_file_with_its_pla
     """As the source changes: into the file the connector was started with (not the package's config.yaml,
     whose sources then replaced the running ones), ${env:...} kept (not the secret it resolves to)."""
     http, path, bridge = page
-    default = pathlib.Path(unified_bridge.__file__).parent.parent / "config" / "config.yaml"
+    default = pathlib.Path(core_bridge.__file__).parent.parent / "config" / "config.yaml"
     before = default.read_bytes()
     try:
         async with http.post("/api/zerobus/config", json={"batch": {"max_records": 250}}) as r:
@@ -303,13 +303,13 @@ async def test_the_page_refuses_a_state_format_or_seconds_the_source_cant_use(pa
 
 async def test_a_source_that_fails_to_start_with_its_new_settings_runs_on_with_the_old(page, started, monkeypatch):
     http, path, bridge = page
-    factory = unified_bridge.create_protocol_client
+    factory = core_bridge.create_protocol_client
 
     def failing(protocol_type, source_name, endpoint, config, on_record, on_stats):
         if endpoint == "mqtt://broken:1883":
             raise ValueError("can't use that endpoint")
         return factory(protocol_type, source_name, endpoint, config, on_record, on_stats)
-    monkeypatch.setattr(unified_bridge, "create_protocol_client", failing)
+    monkeypatch.setattr(core_bridge, "create_protocol_client", failing)
     old = dict(running(bridge, "m"))
     with pytest.raises(ValueError, match="can't use that endpoint"):
         await bridge.update_source("m", {**old, "endpoint": "mqtt://broken:1883"})

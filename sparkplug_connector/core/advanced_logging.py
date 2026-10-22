@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
 
-from unified_connector.core.structured_logging import (
+from sparkplug_connector.core.structured_logging import (
     StructuredLogger,
     SecurityEventCategory,
     get_correlation_id,
@@ -50,7 +50,7 @@ class LogRotationConfig:
 
     # Archiving
     archive_enabled: bool = True
-    archive_dir: Path = Path.home() / '.unified_connector' / 'logs' / 'archive'
+    archive_dir: Path = Path.home() / '.sparkplug_connector' / 'logs' / 'archive'
 
     # Retention policy
     retention_days: int = 90  # Keep logs for 90 days
@@ -318,7 +318,7 @@ class AdvancedLoggingManager:
             config: Log rotation configuration
         """
         self.config = config
-        self.log_dir = Path('/tmp/unified_connector_logs')
+        self.log_dir = Path('/tmp/sparkplug_connector_logs')
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # Ensure archive directory exists
@@ -332,7 +332,7 @@ class AdvancedLoggingManager:
 
         # Structured logger for security events
         self.security_logger = StructuredLogger(
-            logging.getLogger('unified_connector.security')
+            logging.getLogger('sparkplug_connector.security')
         )
 
     def _setup_main_logger(self) -> logging.Logger:
@@ -342,7 +342,7 @@ class AdvancedLoggingManager:
         Returns:
             Configured logger
         """
-        logger = logging.getLogger('unified_connector')
+        logger = logging.getLogger('sparkplug_connector')
         logger.setLevel(logging.INFO)
         logger.propagate = False
 
@@ -356,7 +356,7 @@ class AdvancedLoggingManager:
         logger.addHandler(console_handler)
 
         # File handler with size-based rotation and compression
-        main_log_file = self.log_dir / 'unified_connector.log'
+        main_log_file = self.log_dir / 'sparkplug_connector.log'
         file_handler = CompressingRotatingFileHandler(
             filename=str(main_log_file),
             maxBytes=self.config.max_bytes,
@@ -380,7 +380,7 @@ class AdvancedLoggingManager:
         Returns:
             Configured audit logger
         """
-        logger = logging.getLogger('unified_connector.audit')
+        logger = logging.getLogger('sparkplug_connector.audit')
         logger.setLevel(logging.INFO)
         logger.propagate = False
 
@@ -413,7 +413,7 @@ class AdvancedLoggingManager:
         Returns:
             Configured performance logger
         """
-        logger = logging.getLogger('unified_connector.performance')
+        logger = logging.getLogger('sparkplug_connector.performance')
         logger.setLevel(logging.INFO)
         logger.propagate = False
 

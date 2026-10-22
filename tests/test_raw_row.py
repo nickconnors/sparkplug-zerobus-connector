@@ -7,8 +7,8 @@ import uuid
 import pytest
 
 from conftest import FIXTURES
-from unified_connector.sparkplug import to_tahu_json
-from unified_connector.sparkplug.raw_row import (
+from sparkplug_connector.sparkplug import to_tahu_json
+from sparkplug_connector.sparkplug.raw_row import (
     COLUMNS,
     OtherTopic,
     RawRow,

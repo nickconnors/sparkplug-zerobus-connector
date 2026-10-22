@@ -7,7 +7,7 @@
 #   2. Set zerobus.default_target to your sparkplug_raw table.
 #   3. Under sources:, set enabled: true on the example source (it is off), and primary_host_id if the connector
 #      is the edges' primary host; add more sources the same way (a source's target_table: a table of its own).
-# Run: python -m unified_connector --config <your copy>. The web page's source and ZeroBus edits are saved
+# Run: python -m sparkplug_connector --config <your copy>. The web page's source and ZeroBus edits are saved
 # back into the file it was started with, placeholders kept.
 bridge:
   autostart: true
@@ -71,9 +71,9 @@ web_ui:
     - localhost
     - 127.0.0.1
     - ::1
-    cert_file: ~/.unified_connector/certs/server-cert.pem
-    key_file: ~/.unified_connector/certs/server-key.pem
-    ca_cert_file: ~/.unified_connector/certs/ca-cert.pem
+    cert_file: ~/.sparkplug_connector/certs/server-cert.pem
+    key_file: ~/.sparkplug_connector/certs/server-key.pem
+    ca_cert_file: ~/.sparkplug_connector/certs/ca-cert.pem
     hsts:
       max_age: 31536000
       include_subdomains: true
@@ -81,7 +81,7 @@ web_ui:
     require_client_cert: false
 sources:
 # One row per Sparkplug B message in sparkplug_raw; optionally the edges' primary host and a procedure call
-# per NBIRTH (unified_connector/sparkplug/README.md)
+# per NBIRTH (sparkplug_connector/sparkplug/README.md)
 - name: sparkplug-example
   protocol: sparkplug
   enabled: false
@@ -114,7 +114,7 @@ zerobus:
     table: sparkplug_raw
   auth:
     # or the encrypted credential store: ${credential:zerobus.client_id} / ${credential:zerobus.client_secret}
-    # (python -m unified_connector.core.credential_manager store ...)
+    # (python -m sparkplug_connector.core.credential_manager store ...)
     client_id: '${env:DATABRICKS_CLIENT_ID}'
     client_secret: '${env:DATABRICKS_CLIENT_SECRET}'
   drain_timeout_seconds: 15        # on shutdown: how long the queued rows may take to be written

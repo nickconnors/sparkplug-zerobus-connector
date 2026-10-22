@@ -5,7 +5,7 @@ import pytest
 
 from test_wal import bridge_config, fake_streams  # noqa: F401 - a fixture
 from test_zerobus_restart import hosts, sparkplug_source  # noqa: F401 - a fixture
-from unified_connector.core import unified_bridge
+from sparkplug_connector.core import bridge as core_bridge
 
 
 async def test_a_table_whose_streams_cant_be_set_up_gets_no_writer_and_its_host_stays_offline(
@@ -14,10 +14,10 @@ async def test_a_table_whose_streams_cant_be_set_up_gets_no_writer_and_its_host_
         def __init__(self, *args):
             raise RuntimeError("no Zerobus SDK")
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", Broken)
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", Broken)
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug_source()]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
         assert bridge.writers == {} and bridge.tables == {}
@@ -28,7 +28,7 @@ async def test_a_table_whose_streams_cant_be_set_up_gets_no_writer_and_its_host_
 
 
 async def test_editing_or_removing_an_unknown_source_is_refused(tmp_path):
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
     with pytest.raises(ValueError, match="not found"):
         await bridge.update_source("nope", {"name": "nope"})
     with pytest.raises(ValueError, match="not found"):
@@ -38,7 +38,7 @@ async def test_editing_or_removing_an_unknown_source_is_refused(tmp_path):
 
 
 async def test_a_zerobus_start_that_fails_says_so(tmp_path, fake_streams, monkeypatch):
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
 
     async def broken():
         raise RuntimeError("bad table")

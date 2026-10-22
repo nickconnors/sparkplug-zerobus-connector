@@ -13,9 +13,9 @@ from test_edge_node_schemas import FakeSql
 from test_per_target_queues import rows, wait_for
 from test_sparkplug_source import broker, publish  # noqa: F401 - broker: a fixture
 from test_wal import bridge_config, fake_streams, ids  # noqa: F401 - fake_streams is a fixture
-from unified_connector.core import unified_bridge
-from unified_connector.protocols.base import ProtocolType
-from unified_connector.sparkplug.raw_row import convert
+from sparkplug_connector.core import bridge as core_bridge
+from sparkplug_connector.protocols.base import ProtocolType
+from sparkplug_connector.sparkplug.raw_row import convert
 
 TARGET = "example.c.s.sparkplug_raw"
 NBIRTH = (FIXTURES / "transmission" / "nbirth-1.bin").read_bytes()
@@ -47,7 +47,7 @@ def acked(fake_streams):
 
 async def test_rows_queued_while_zerobus_is_stopped_are_written_once_after_it_starts(tmp_path, acked):
     acked.fail_opens = 10**6                              # unreachable: the 3 rows stay queued
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
     await bridge.start_infra()
     first = rows("A", 3)
     for r in first:
@@ -65,7 +65,7 @@ async def test_rows_queued_while_zerobus_is_stopped_are_written_once_after_it_st
 
 async def test_a_batch_in_flight_when_zerobus_stops_is_sent_first_by_the_next_writer(tmp_path, acked):
     acked.fail_waits = 10**6                              # sent, never acknowledged
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
     await bridge.start_infra()
     sent = rows("A", 3)
     for r in sent:
@@ -123,7 +123,7 @@ def hosts(monkeypatch):
         made[source_name] = FakeHost(config)
         return made[source_name]
 
-    monkeypatch.setattr(unified_bridge, "create_protocol_client", factory)
+    monkeypatch.setattr(core_bridge, "create_protocol_client", factory)
     return made
 
 
@@ -135,7 +135,7 @@ def sparkplug_source(**extra) -> dict:
 async def test_the_primary_host_is_offline_while_zerobus_is_stopped(tmp_path, acked, hosts):
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug_source()]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     supervisor = bridge.host_supervisors["sp"]
     await wait_for(lambda: bridge.writers[TARGET].status().last_success is not None)
@@ -152,7 +152,7 @@ async def test_a_primary_host_started_before_zerobus_waits_offline_for_its_write
     cfg = bridge_config(tmp_path)
     cfg["zerobus"]["enabled"] = False                       # data collection only, Zerobus started later
     cfg["sources"] = [sparkplug_source()]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     supervisor = bridge.host_supervisors["sp"]
     assert await supervisor.tick() == "OFFLINE" and not hosts["sp"].online_allowed.is_set()
@@ -166,7 +166,7 @@ async def test_a_host_started_before_zerobus_follows_its_table_s_writer(tmp_path
     cfg = bridge_config(tmp_path)
     cfg["zerobus"].update({"enabled": False})
     cfg["sources"] = [sparkplug_source()]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     supervisor = bridge.host_supervisors["sp"]
     assert await supervisor.tick() == "OFFLINE"            # no writer yet: nothing is stored
@@ -184,7 +184,7 @@ async def test_a_raw_table_name_the_nbirth_caller_cant_use_doesnt_stop_zerobus(t
     cfg["zerobus"]["default_target"]["catalog"] = catalog
     cfg["sources"] = [sparkplug_source(edge_node_schemas={"enabled": True, "warehouse_id": "w",
                                                           "procedures": ["c.s.create_edge_node_schema"]})]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     assert (await bridge.start_zerobus())["status"] == "ok"
     assert len(bridge.writers) == 1 and len(bridge.writer_tasks) == 1     # Zerobus runs either way
@@ -198,7 +198,7 @@ async def test_the_nbirth_caller_listens_on_the_writer_of_the_moment(tmp_path, a
     cfg["zerobus"]["enabled"] = zerobus_at_start
     cfg["sources"] = [sparkplug_source(edge_node_schemas={"enabled": True, "warehouse_id": "w",
                                                           "procedures": ["c.s.create_edge_node_schema"]})]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     if zerobus_at_start:
         old = bridge.writers[TARGET]
@@ -225,11 +225,11 @@ async def test_an_acknowledged_nbirth_calls_the_procedure(tmp_path, acked, hosts
         def __init__(self, *args):
             super().__init__()
             made.append(self)
-    monkeypatch.setattr(unified_bridge, "DatabricksSql", Sql)
+    monkeypatch.setattr(core_bridge, "DatabricksSql", Sql)
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug_source(edge_node_schemas={"enabled": True, "warehouse_id": "w",
                                                           "procedures": ["c.s.create_edge_node_schema"]})]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
         ndeath = rows("A", 1)[0]
@@ -247,7 +247,7 @@ async def test_a_sparkplug_protocol_written_with_capitals_is_still_a_primary_hos
     """The factory takes the protocol in any case; a primary host without its supervisor waits to go ONLINE for good."""
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug_source(protocol="Sparkplug")]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
         assert "sp" in bridge.host_supervisors
@@ -277,9 +277,9 @@ async def test_the_reconnect_backoff_grows_unless_the_session_ran_a_while(monkey
         async def disconnect(self):
             pass
 
-    monkeypatch.setattr(unified_bridge, "create_protocol_client", lambda *a, **k: Flaky())
-    monkeypatch.setattr(unified_bridge, "HEALTHY_SESSION_S", 0.05)
-    bridge = unified_bridge.UnifiedBridge({"sources": [{"name": "m", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883"}],
+    monkeypatch.setattr(core_bridge, "create_protocol_client", lambda *a, **k: Flaky())
+    monkeypatch.setattr(core_bridge, "HEALTHY_SESSION_S", 0.05)
+    bridge = core_bridge.Bridge({"sources": [{"name": "m", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883"}],
                                            "zerobus": {"enabled": False},
                                            "backpressure": {}})
     bridge.reconnect_initial_delay_sec, bridge.reconnect_multiplier, bridge.reconnect_max_delay_sec = 0.01, 2.0, 10.0
@@ -297,7 +297,7 @@ async def test_the_bridge_stops_while_a_primary_host_waits_to_go_online(tmp_path
     cfg = bridge_config(tmp_path)
     cfg["zerobus"]["enabled"] = False
     cfg["sources"] = [sparkplug_source()]                   # the real SparkplugClient (nothing listens: it never connects)
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     await asyncio.sleep(0.1)
     task = bridge.client_tasks["sp"]
@@ -313,14 +313,14 @@ async def test_the_sparkplug_health_of_a_primary_host_and_of_a_plain_subscriber(
         def __init__(self, *args):
             super().__init__()
             made.append(self)
-    monkeypatch.setattr(unified_bridge, "DatabricksSql", Sql)
+    monkeypatch.setattr(core_bridge, "DatabricksSql", Sql)
     endpoint, port = broker
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug_source(endpoint=endpoint, client_id="health-host", edge_node_schemas={
                           "enabled": True, "warehouse_id": "w", "procedures": ["c.s.create_edge_node_schema"]}),
                       {"name": "plain", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "health-plain",
                        "topics": ["spBv1.0/Other/#"]}]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
         await wait_for(lambda: all(n in bridge.clients and bridge.clients[n].subscribed.is_set() for n in ("sp", "plain")), 10)

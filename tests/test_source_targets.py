@@ -10,7 +10,7 @@ from test_per_target_queues import rows, wait_for
 from test_wal import bridge_config, fake_streams  # noqa: F401 - a fixture
 from test_web_sources import page, saved, started  # noqa: F401 - fixtures
 from test_zerobus_restart import hosts  # noqa: F401 - a fixture
-from unified_connector.core import targets, unified_bridge
+from sparkplug_connector.core import bridge as core_bridge, targets
 
 DEFAULT = "example.c.s.sparkplug_raw"
 
@@ -51,10 +51,10 @@ async def test_each_source_writes_its_own_table(tmp_path, monkeypatch, hosts):
         async def open(self):
             return await streams[self.table].open()
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug(target_table="c.s.sparkplug_raw_2"), sparkplug("other")]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
         assert sorted(bridge.writers) == [DEFAULT, "example.c.s.sparkplug_raw_2"]
@@ -73,7 +73,7 @@ async def test_each_source_writes_its_own_table(tmp_path, monkeypatch, hosts):
 async def test_a_source_with_a_malformed_target_table_isnt_started(tmp_path, fake_streams, hosts):
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [sparkplug(target_table="bronze")]
-    bridge = unified_bridge.UnifiedBridge(cfg)
+    bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
         assert bridge.clients == {}
@@ -84,7 +84,7 @@ async def test_a_source_with_a_malformed_target_table_isnt_started(tmp_path, fak
 
 
 async def test_a_source_s_new_table_is_set_up_when_it_starts(tmp_path, fake_streams, hosts):
-    bridge = unified_bridge.UnifiedBridge(bridge_config(tmp_path))
+    bridge = core_bridge.Bridge(bridge_config(tmp_path))
     await bridge.start()
     try:
         await bridge.add_source("sp2", "sparkplug", {"endpoint": "mqtt://localhost:1883", "target_table": "c.s.new_table"})

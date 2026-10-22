@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from unified_connector.core.confirmed_writer import WriterStatus
-from unified_connector.sparkplug.host import (
+from sparkplug_connector.core.confirmed_writer import WriterStatus
+from sparkplug_connector.sparkplug.host import (
     HostState,
     HostSupervisor,
     is_online_state,

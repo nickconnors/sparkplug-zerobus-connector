@@ -15,7 +15,7 @@ import glob
 import os
 import zlib
 
-from unified_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
+from sparkplug_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
 
 GRADLE_CACHE = os.path.expanduser("~/.gradle/caches/modules-2/files-2.1")
 JARS = (

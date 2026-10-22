@@ -1,4 +1,4 @@
-"""The ``sparkplug`` source: SparkplugClient, and Sparkplug rows through UnifiedBridge (Zerobus off).
+"""The ``sparkplug`` source: SparkplugClient, and Sparkplug rows through Bridge (Zerobus off).
 
 The end-to-end tests run an in-process MQTT broker (amqtt) and publish the Transmission-shaped
 payloads with their real topics; each row's ``msg`` must equal Java Tahu's saved JSON.
@@ -14,11 +14,11 @@ import aiomqtt
 import pytest
 
 from conftest import EXPECTED, FIXTURES
-from unified_connector.core.unified_bridge import UnifiedBridge
-from unified_connector.protocols import sparkplug_client
-from unified_connector.protocols.factory import create_protocol_client
-from unified_connector.protocols.sparkplug_client import SparkplugClient, parse_endpoint
-from unified_connector.sparkplug.raw_row import COLUMNS, RawRow, convert
+from sparkplug_connector.core.bridge import Bridge
+from sparkplug_connector.protocols import sparkplug_client
+from sparkplug_connector.protocols.factory import create_protocol_client
+from sparkplug_connector.protocols.sparkplug_client import SparkplugClient, parse_endpoint
+from sparkplug_connector.sparkplug.raw_row import COLUMNS, RawRow, convert
 
 TRANSMISSION = FIXTURES / "transmission"
 SKIPPED = [   # (topic, payload, counter): messages that get no row
@@ -220,7 +220,7 @@ async def test_rows_from_a_broker_equal_java_tahu(broker):
 
 async def test_bridge_queues_sparkplug_rows_with_the_sparkplug_raw_columns(broker):
     endpoint, _port = broker
-    bridge = UnifiedBridge({
+    bridge = Bridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "bridge-test"}],
         "zerobus": {"enabled": False},
         "backpressure": {},
@@ -245,7 +245,7 @@ async def test_bridge_queues_sparkplug_rows_with_the_sparkplug_raw_columns(broke
 
 
 def test_bridge_writes_a_row_unchanged():
-    bridge = UnifiedBridge({"sources": [], "zerobus": {"enabled": False},
+    bridge = Bridge({"sources": [], "zerobus": {"enabled": False},
                             "backpressure": {}})
     row = convert("spBv1.0/Plant1/NDEATH/Line A", (TRANSMISSION / "ndeath-1.bin").read_bytes(), 1790694245123).row
     bridge._on_record(row)
@@ -257,7 +257,7 @@ async def test_source_reconnects_and_receives_again_after_the_connection_drops(b
     loop calls client.stop() and connects again, and rows flow again. (amqtt can't stand in for a broker
     restart: its shutdown leaves the old sessions answering.)"""
     endpoint, port = broker
-    bridge = UnifiedBridge({
+    bridge = Bridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "drop-test"}],
         "zerobus": {"enabled": False},
         "backpressure": {},

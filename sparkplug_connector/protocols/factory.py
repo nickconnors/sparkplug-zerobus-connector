@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from unified_connector.protocols.base import ProtocolClient, ProtocolType
-from unified_connector.protocols.sparkplug_client import SparkplugClient
+from sparkplug_connector.protocols.base import ProtocolClient, ProtocolType
+from sparkplug_connector.protocols.sparkplug_client import SparkplugClient
 
 
 def create_protocol_client(

@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from unified_connector.core.backpressure import BackpressureManager
+from sparkplug_connector.core.backpressure import BackpressureManager
 
 
 def queue(size: int, policy: str) -> tuple[BackpressureManager, list]:

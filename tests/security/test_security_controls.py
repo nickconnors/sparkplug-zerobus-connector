@@ -20,7 +20,7 @@ class TestAuthentication:
     def test_oauth2_required(self):
         """Test that OAuth2 authentication is enforced."""
         try:
-            from unified_connector.web.auth import AuthenticationManager, OAuth
+            from sparkplug_connector.web.auth import AuthenticationManager, OAuth
         except ImportError as e:
             if 'authlib' in str(e):
                 pytest.skip("authlib.integrations.aiohttp_client not available")
@@ -54,7 +54,7 @@ class TestAuthentication:
     def test_mfa_enforcement(self):
         """Test that MFA is enforced."""
         try:
-            from unified_connector.web.auth import AuthenticationManager, OAuth
+            from sparkplug_connector.web.auth import AuthenticationManager, OAuth
         except ImportError as e:
             if 'authlib' in str(e):
                 pytest.skip("authlib.integrations.aiohttp_client not available")
@@ -88,7 +88,7 @@ class TestAuthentication:
     def test_session_timeout(self):
         """Test that sessions timeout correctly."""
         try:
-            from unified_connector.web.auth import AuthenticationManager, OAuth
+            from sparkplug_connector.web.auth import AuthenticationManager, OAuth
         except ImportError as e:
             if 'authlib' in str(e):
                 pytest.skip("authlib.integrations.aiohttp_client not available")
@@ -117,7 +117,7 @@ class TestAuthorization:
 
     def test_admin_only_endpoints(self):
         """Test that admin endpoints reject non-admin users."""
-        from unified_connector.web.rbac import User, Role, Permission, ROLE_PERMISSIONS
+        from sparkplug_connector.web.rbac import User, Role, Permission, ROLE_PERMISSIONS
 
         # Test admin has all permissions
         admin = User(email='admin@test.com', name='Admin')
@@ -142,7 +142,7 @@ class TestAuthorization:
 
     def test_role_based_permissions(self):
         """Test that roles have correct permissions."""
-        from unified_connector.web.rbac import Role, Permission, ROLE_PERMISSIONS
+        from sparkplug_connector.web.rbac import Role, Permission, ROLE_PERMISSIONS
 
         # Admin should have all permissions
         admin_perms = ROLE_PERMISSIONS[Role.ADMIN]
@@ -173,7 +173,7 @@ class TestInputValidation:
 
     def test_sql_injection_prevention(self):
         """Test that SQL injection attempts are blocked."""
-        from unified_connector.web.input_validation import validate_source_name, ValidationError
+        from sparkplug_connector.web.input_validation import validate_source_name, ValidationError
 
         sql_injection_payloads = [
             "'; DROP TABLE users--",
@@ -188,7 +188,7 @@ class TestInputValidation:
 
     def test_command_injection_prevention(self):
         """Test that command injection attempts are blocked."""
-        from unified_connector.web.input_validation import validate_endpoint, ValidationError
+        from sparkplug_connector.web.input_validation import validate_endpoint, ValidationError
 
         command_injection_payloads = [
             "mqtt://localhost:1883; rm -rf /",
@@ -203,7 +203,7 @@ class TestInputValidation:
 
     def test_xss_prevention(self):
         """Test that XSS attempts are blocked."""
-        from unified_connector.web.input_validation import validate_source_name, ValidationError
+        from sparkplug_connector.web.input_validation import validate_source_name, ValidationError
 
         xss_payloads = [
             "<script>alert('xss')</script>",
@@ -217,7 +217,7 @@ class TestInputValidation:
 
     def test_path_traversal_prevention(self):
         """Test that path traversal attempts are blocked."""
-        from unified_connector.web.input_validation import validate_source_name, ValidationError
+        from sparkplug_connector.web.input_validation import validate_source_name, ValidationError
 
         path_traversal_payloads = [
             "../../../etc/passwd",
@@ -236,7 +236,7 @@ class TestEncryption:
 
     def test_credential_encryption(self):
         """Test that credentials are encrypted at rest."""
-        from unified_connector.core.encryption import EncryptionManager
+        from sparkplug_connector.core.encryption import EncryptionManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
             encryption = EncryptionManager(
@@ -258,7 +258,7 @@ class TestEncryption:
 
     def test_tls_12_minimum(self):
         """Test that TLS 1.2 is the minimum version."""
-        from unified_connector.core.tls_manager import TLSManager
+        from sparkplug_connector.core.tls_manager import TLSManager
         import ssl
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -275,7 +275,7 @@ class TestEncryption:
 
     def test_aes_256_encryption(self):
         """Test that AES-256 encryption is used."""
-        from unified_connector.core.encryption import EncryptionManager
+        from sparkplug_connector.core.encryption import EncryptionManager
         from cryptography.fernet import Fernet
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -294,7 +294,7 @@ class TestEncryption:
 
     def test_pbkdf2_key_derivation(self):
         """Test that PBKDF2 key derivation is used with proper iterations."""
-        from unified_connector.core.encryption import EncryptionManager
+        from sparkplug_connector.core.encryption import EncryptionManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
             encryption = EncryptionManager(
@@ -315,7 +315,7 @@ class TestLogging:
 
     def test_structured_logging(self):
         """Test that structured logging is enabled."""
-        from unified_connector.core.structured_logging import (
+        from sparkplug_connector.core.structured_logging import (
             StructuredLogger,
             SecurityEventCategory
         )
@@ -349,7 +349,7 @@ class TestLogging:
 
     def test_audit_logging(self):
         """Test that audit logging captures security events."""
-        from unified_connector.core.structured_logging import (
+        from sparkplug_connector.core.structured_logging import (
             StructuredLogger,
             SecurityEventCategory
         )

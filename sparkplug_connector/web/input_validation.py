@@ -14,8 +14,8 @@ import logging
 from typing import Any, Dict, Optional, List
 from pathlib import Path
 
-from unified_connector.core.targets import parse_target_table
-from unified_connector.sparkplug.edge_node_schemas import nbirth_procedures
+from sparkplug_connector.core.targets import parse_target_table
+from sparkplug_connector.sparkplug.edge_node_schemas import nbirth_procedures
 
 logger = logging.getLogger(__name__)
 

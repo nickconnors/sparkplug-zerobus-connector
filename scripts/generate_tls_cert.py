@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TLS Certificate Generation Tool for Unified OT Connector.
+TLS Certificate Generation Tool for Sparkplug Zerobus Connector.
 
 This script provides a simple CLI for generating self-signed TLS certificates
 for HTTPS support in the web UI.
@@ -20,13 +20,13 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from unified_connector.core.tls_manager import TLSManager
+from sparkplug_connector.core.tls_manager import TLSManager
 
 
 def main():
     """Main entry point for TLS certificate management."""
     parser = argparse.ArgumentParser(
-        description='TLS Certificate Manager for Unified OT Connector',
+        description='TLS Certificate Manager for Sparkplug Zerobus Connector',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -35,8 +35,8 @@ Examples:
 
   # Generate certificate with custom common name and SANs
   python scripts/generate_tls_cert.py --generate \\
-    --common-name unified-connector.example.com \\
-    --san localhost 127.0.0.1 192.168.1.100 unified-connector.example.com \\
+    --common-name connector.example.com \\
+    --san localhost 127.0.0.1 192.168.1.100 connector.example.com \\
     --days 730
 
   # Validate existing certificate
@@ -91,8 +91,8 @@ NIS2 Compliance: Article 21.2(h) - Encryption in transit
     )
     parser.add_argument(
         '--organization',
-        default='Unified OT Connector',
-        help='Organization name - default: "Unified OT Connector"'
+        default='Sparkplug Zerobus Connector',
+        help='Organization name - default: "Sparkplug Zerobus Connector"'
     )
     parser.add_argument(
         '--key-size',
@@ -104,7 +104,7 @@ NIS2 Compliance: Article 21.2(h) - Encryption in transit
     parser.add_argument(
         '--cert-dir',
         type=Path,
-        help='Certificate directory (default: ~/.unified_connector/certs)'
+        help='Certificate directory (default: ~/.sparkplug_connector/certs)'
     )
 
     args = parser.parse_args()
@@ -145,7 +145,7 @@ NIS2 Compliance: Article 21.2(h) - Encryption in transit
             print("     tls:")
             print("       enabled: true")
             print()
-            print("2. Restart the Unified OT Connector")
+            print("2. Restart the Sparkplug Zerobus Connector")
             print()
             print("3. Access web UI at:")
             if args.common_name == 'localhost':

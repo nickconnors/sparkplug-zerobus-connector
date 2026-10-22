@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 import yaml
 
-from unified_connector.core.encryption import get_encryption_manager, EncryptionError
+from sparkplug_connector.core.encryption import get_encryption_manager, EncryptionError
 
 logger = logging.getLogger(__name__)
 

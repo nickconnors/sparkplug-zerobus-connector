@@ -5,7 +5,7 @@ Tests input validation to prevent injection attacks.
 """
 
 import pytest
-from unified_connector.web.input_validation import (
+from sparkplug_connector.web.input_validation import (
     validate_source_name,
     validate_protocol,
     validate_endpoint,

@@ -19,8 +19,8 @@ import time
 import pytest
 
 from test_sparkplug_source import SKIPPED, broker, publish, transmission_messages, wait_for  # noqa: F401 (broker: fixture)
-from unified_connector.core.unified_bridge import UnifiedBridge
-from unified_connector.sparkplug.raw_row import COLUMNS
+from sparkplug_connector.core.bridge import Bridge
+from sparkplug_connector.sparkplug.raw_row import COLUMNS
 
 ENV_FILE = os.environ.get("SPARKPLUG_LIVE_ENV")
 PROFILE = os.environ.get("SPARKPLUG_LIVE_PROFILE")
@@ -62,7 +62,7 @@ async def test_rows_land_in_the_table_equal_to_java_tahu(broker):
     env = _env()
     endpoint, port = broker
     target = dict(zip(("catalog", "schema", "table"), TABLE.split(".")))
-    bridge = UnifiedBridge({
+    bridge = Bridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "live-test"}],
         "zerobus": {"enabled": True, "zerobus_endpoint": env["ZEROBUS_ENDPOINT"],
                     "auth": {"client_id": env["DATABRICKS_CLIENT_ID"], "client_secret": env["DATABRICKS_CLIENT_SECRET"]},

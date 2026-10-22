@@ -11,7 +11,7 @@ import logging
 from aiohttp import web
 from typing import Callable, Awaitable
 
-from unified_connector.core.structured_logging import (
+from sparkplug_connector.core.structured_logging import (
     generate_correlation_id,
     set_correlation_id,
     clear_correlation_id,

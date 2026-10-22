@@ -5,7 +5,7 @@ import type { ConnectorStatus, SourceConfig, SparkplugHealth } from "../api/type
 import { useAuthState } from "../auth/AuthContext";
 import { useAppToast } from "../toast/ToastContext";
 
-// Sparkplug B source settings (unified_connector/sparkplug/README.md); username, password, topics and TLS stay in the
+// Sparkplug B source settings (sparkplug_connector/sparkplug/README.md); username, password, topics and TLS stay in the
 // config file
 const EMPTY_SPARKPLUG = {
   client_id: "",

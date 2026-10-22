@@ -192,9 +192,9 @@ doesn't show and unchanged fields stay as written there, `${env:...}` placeholde
 ## Docker
 
 ```
-docker build -f Dockerfile.connector -t unified-ot-zerobus --build-arg PIP_INDEX_URL=<index> .
+docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=<index> .
 docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8001:8001 \
-  -v "$PWD/my-config.yaml:/app/my-config.yaml" -v connector-wal:/app/wal unified-ot-zerobus --config /app/my-config.yaml
+  -v "$PWD/my-config.yaml:/app/my-config.yaml" -v connector-wal:/app/wal sparkplug-zerobus --config /app/my-config.yaml
 ```
 
 Python 3.12 with protobuf's upb implementation (~0.1 ms per typical DDATA, ~1 ms per 4.7 KB DBIRTH); runs

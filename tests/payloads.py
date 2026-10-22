@@ -13,8 +13,8 @@ import struct
 import zlib
 from typing import Any
 
-from unified_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
-from unified_connector.sparkplug import sparkplug_b_pb2 as pb
+from sparkplug_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
+from sparkplug_connector.sparkplug import sparkplug_b_pb2 as pb
 
 TS = 1790696925611
 LONG_MIN, LONG_MAX = -(1 << 63), (1 << 63) - 1

@@ -11,8 +11,8 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from unified_connector.core.credential_manager import CredentialManager
-from unified_connector.core.config_encryption import ConfigEncryption
+from sparkplug_connector.core.credential_manager import CredentialManager
+from sparkplug_connector.core.config_encryption import ConfigEncryption
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class ConfigLoader:
         """Initialize config loader.
 
         Args:
-            config_path: Path to config.yaml (default: unified_connector/config/config.yaml)
+            config_path: Path to config.yaml (default: sparkplug_connector/config/config.yaml)
             credential_manager: Credential manager instance (default: create new)
             enable_encryption: Enable config file encryption (default: True)
         """

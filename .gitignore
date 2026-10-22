@@ -14,12 +14,12 @@ build/
 *.pid
 
 # Local runtime state (do not commit)
-.unified_connector/
+.sparkplug_connector/
 wal/
 certs/
 
 # Built React web UI (npm run build in webui/)
-unified_connector/web/static/connector-ui/
+sparkplug_connector/web/static/connector-ui/
 
 # Environment variables and secrets: never commit
 .env

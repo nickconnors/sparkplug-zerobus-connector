@@ -8,11 +8,11 @@ import json
 import pytest
 
 from conftest import FIXTURES
-from unified_connector.core import unified_bridge
-from unified_connector.core.backpressure import BackpressureManager
-from unified_connector.core.confirmed_writer import (MAX_BACKOFF_S, MAX_RECORD_BYTES, ConfirmedWriter, ZerobusRowStreams,
+from sparkplug_connector.core import bridge as core_bridge
+from sparkplug_connector.core.backpressure import BackpressureManager
+from sparkplug_connector.core.confirmed_writer import (MAX_BACKOFF_S, MAX_RECORD_BYTES, ConfirmedWriter, ZerobusRowStreams,
                                                      take_from_backpressure)
-from unified_connector.sparkplug.raw_row import COLUMNS, convert
+from sparkplug_connector.sparkplug.raw_row import COLUMNS, convert
 
 
 class ManualClock:
@@ -407,8 +407,8 @@ async def test_bridge_writes_sparkplug_rows_through_the_confirmed_writer(monkeyp
         async def open(self):
             return await streams.open()
 
-    monkeypatch.setattr(unified_bridge, "ZerobusRowStreams", FakeRowStreams)
-    bridge = unified_bridge.UnifiedBridge({
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
+    bridge = core_bridge.Bridge({
         "sources": [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True}],
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},

@@ -18,7 +18,7 @@ import logging
 import time
 from typing import Any, Callable, Protocol
 
-from unified_connector.core.confirmed_writer import WriterStatus
+from sparkplug_connector.core.confirmed_writer import WriterStatus
 
 logger = logging.getLogger(__name__)
 

@@ -29,7 +29,7 @@ except ImportError:
 from cryptography import fernet
 
 # Import custom Databricks OAuth client
-from unified_connector.web.databricks_oauth import DatabricksOAuthClient, generate_state
+from sparkplug_connector.web.databricks_oauth import DatabricksOAuthClient, generate_state
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +338,7 @@ class AuthenticationManager:
                 logger.info(f"User {user_email} authenticated with MFA")
 
             # Create user object with role (RBAC will be implemented separately)
-            from unified_connector.web.rbac import User
+            from sparkplug_connector.web.rbac import User
             user = User(
                 email=user_email,
                 name=user_name,
@@ -484,7 +484,7 @@ async def auth_middleware(request: web.Request, handler):
         return web.HTTPFound('/login')
 
     # Recreate User object and attach to request
-    from unified_connector.web.rbac import User, Role
+    from sparkplug_connector.web.rbac import User, Role
     request['user'] = User(
         email=user_data['email'],
         name=user_data.get('name', user_data['email']),
@@ -556,7 +556,7 @@ async def _authenticate_with_client_cert(request: web.Request, auth_manager) -> 
             role_name = default_role
 
         # Create User object
-        from unified_connector.web.rbac import User
+        from sparkplug_connector.web.rbac import User
         user = User(
             email=cn,  # Use CN as email/identifier
             name=cn,
@@ -566,7 +566,7 @@ async def _authenticate_with_client_cert(request: web.Request, auth_manager) -> 
         )
 
         # Set role from mapping
-        from unified_connector.web.rbac import Role
+        from sparkplug_connector.web.rbac import Role
         user.role = Role[role_name.upper()]
 
         logger.info(f"Client certificate authenticated: CN={cn}, OU={ou}, role={role_name}")

@@ -1,7 +1,7 @@
 """Sparkplug B source: one ``sparkplug_raw`` row per Sparkplug message from an MQTT server (e.g. Chariot).
 
 Connects to the MQTT server (``mqtt://host:port`` or ``mqtts://host:port``; credentials and TLS through
-``mqtt_security.py``), subscribes (QoS 0 by default), keeps each payload as bytes and hands a ``RawRow`` (``unified_connector.sparkplug.raw_row``) to the
+``mqtt_security.py``), subscribes (QoS 0 by default), keeps each payload as bytes and hands a ``RawRow`` (``sparkplug_connector.sparkplug.raw_row``) to the
 bridge, which writes it unchanged.
 
 With ``primary_host_id`` it is the edges' Sparkplug **primary host application** (``sparkplug/host.py``):
@@ -21,10 +21,10 @@ from typing import Any, Callable
 
 import aiomqtt
 
-from unified_connector.protocols.base import ProtocolClient, ProtocolType
-from unified_connector.protocols.mqtt_security import MQTTSecurityManager, create_security_config_from_dict
-from unified_connector.sparkplug.host import V2, V3, is_online_state, state_payload, state_topic
-from unified_connector.sparkplug.raw_row import Outcome, RawRow, Skip, convert
+from sparkplug_connector.protocols.base import ProtocolClient, ProtocolType
+from sparkplug_connector.protocols.mqtt_security import MQTTSecurityManager, create_security_config_from_dict
+from sparkplug_connector.sparkplug.host import V2, V3, is_online_state, state_payload, state_topic
+from sparkplug_connector.sparkplug.raw_row import Outcome, RawRow, Skip, convert
 
 logger = logging.getLogger(__name__)
 

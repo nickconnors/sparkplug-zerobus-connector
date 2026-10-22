@@ -1,11 +1,11 @@
 # The connector: Sparkplug B (MQTT) to Databricks through Zerobus (no React web UI build: build it in webui/
 # first to include it; protobuf runs its fast upb implementation).
 #
-#   docker build -f Dockerfile.connector -t unified-ot-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
+#   docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
 #   docker run --env-file connector.env -p 127.0.0.1:8001:8001 -v "$PWD/my-config.yaml:/app/my-config.yaml" \
-#     -v connector-wal:/app/wal unified-ot-zerobus --config /app/my-config.yaml
+#     -v connector-wal:/app/wal sparkplug-zerobus --config /app/my-config.yaml
 #
-# Without --config it runs unified_connector/config/config.yaml, whose example source is off: mount your
+# Without --config it runs sparkplug_connector/config/config.yaml, whose example source is off: mount your
 # copy (source enabled, table set) and pass --config. connector.env holds the variables the config
 # reads (its header lists them). The write-ahead log (zerobus.wal) is in /app/wal: a volume keeps it.
 FROM python:3.12-slim
@@ -14,11 +14,11 @@ ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt
-COPY unified_connector ./unified_connector
+COPY sparkplug_connector ./sparkplug_connector
 RUN mkdir -p /app/wal && useradd --create-home connector && chown -R connector /app
 USER connector
 EXPOSE 8001
 # Health: GET /health on the web UI's port (web_ui.port in the config; CONNECTOR_HEALTH_PORT if it isn't 8001)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('CONNECTOR_HEALTH_PORT', '8001'), timeout=4)"]
-ENTRYPOINT ["python", "-m", "unified_connector"]
+ENTRYPOINT ["python", "-m", "sparkplug_connector"]

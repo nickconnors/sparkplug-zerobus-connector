@@ -263,7 +263,7 @@ class ZerobusRowStreams:
     def __init__(self, endpoint: str, workspace_url: str, table: str, client_id: str, client_secret: str):
         from zerobus.sdk.aio import ZerobusSdk
 
-        self._sdk = ZerobusSdk(endpoint, workspace_url, "unified-ot-zerobus-connector/sparkplug")
+        self._sdk = ZerobusSdk(endpoint, workspace_url, "sparkplug-zerobus-connector")
         self._table, self._client_id, self._client_secret = table, client_id, client_secret
 
     async def open(self) -> RowStream:

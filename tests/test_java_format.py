@@ -10,7 +10,7 @@ import struct
 
 import pytest
 
-from unified_connector.sparkplug.java_format import (
+from sparkplug_connector.sparkplug.java_format import (
     java_double_to_string,
     java_float_to_string,
     java_hashmap_order,

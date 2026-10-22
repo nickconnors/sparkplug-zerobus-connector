@@ -14,7 +14,7 @@ import enum
 import uuid
 from dataclasses import dataclass
 
-from unified_connector.sparkplug.tahu_json import to_tahu_json
+from sparkplug_connector.sparkplug.tahu_json import to_tahu_json
 
 NAMESPACE = "spBv1.0"
 NODE_TYPES = frozenset({"NBIRTH", "NDEATH", "NDATA", "NCMD"})
