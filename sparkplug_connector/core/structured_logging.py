@@ -3,8 +3,6 @@ Structured Logging for SIEM Integration.
 
 Provides JSON-formatted logging with security event categories for
 integration with SIEM systems (Splunk, ELK, Azure Sentinel, etc.).
-
-NIS2 Compliance: Article 21.2(b) - Incident Handling
 """
 
 import logging

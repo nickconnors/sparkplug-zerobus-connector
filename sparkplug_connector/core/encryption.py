@@ -1,13 +1,10 @@
 """
-Data Encryption Module for NIS2 Compliance.
+Data Encryption Module.
 
 Provides encryption for:
 - Data at rest (credentials, configuration, sensitive data)
 - Encryption key management
 - Secure key derivation from master password
-
-NIS2 Compliance: Article 21.2(h) - Encryption
-                Article 21.2(j) - Cryptography
 """
 
 import os

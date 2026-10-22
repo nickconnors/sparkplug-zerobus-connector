@@ -1,7 +1,7 @@
 """
 Security Headers Middleware for Web UI.
 
-Implements security headers for NIS2 compliance:
+Implements security headers:
 - Content Security Policy (CSP)
 - HTTP Strict Transport Security (HSTS)
 - X-Frame-Options (clickjacking protection)
@@ -9,8 +9,6 @@ Implements security headers for NIS2 compliance:
 - X-XSS-Protection (XSS filter)
 - Referrer-Policy
 - Permissions-Policy
-
-NIS2 Compliance: Article 21.2(a) - Risk Analysis and Security Policies
 """
 
 import logging
@@ -83,7 +81,6 @@ async def security_headers_middleware(
 
     # Strict-Transport-Security (HSTS) - Enable when HTTPS is active
     # This header forces browsers to use HTTPS for all future requests
-    # NIS2 Compliance: Article 21.2(h) - Encryption of data in transit
     if is_https:
         # Get HSTS configuration from app config (if available)
         hsts_config = getattr(request.app, 'hsts_config', {})

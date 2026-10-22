@@ -9,8 +9,6 @@ Usage:
     python scripts/generate_tls_cert.py --generate
     python scripts/generate_tls_cert.py --info
     python scripts/generate_tls_cert.py --validate
-
-NIS2 Compliance: Article 21.2(h) - Encryption (data in transit)
 """
 
 import sys
@@ -49,8 +47,6 @@ After generating:
   1. Update config.yaml: set web_ui.tls.enabled = true
   2. Restart the connector
   3. Access UI at https://localhost:8082 (or your configured hostname)
-
-NIS2 Compliance: Article 21.2(h) - Encryption in transit
         """
     )
 

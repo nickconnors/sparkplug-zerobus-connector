@@ -3,8 +3,6 @@ Correlation ID Middleware for Request Tracking.
 
 Assigns a unique correlation ID to each HTTP request for tracing through logs.
 Useful for debugging and security incident investigation.
-
-NIS2 Compliance: Article 21.2(b) - Incident Handling
 """
 
 import logging

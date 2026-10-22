@@ -8,8 +8,6 @@ Usage:
     python scripts/encrypt_config.py --identify config.yaml
     python scripts/encrypt_config.py --encrypt config.yaml
     python scripts/encrypt_config.py --decrypt config.encrypted.yaml
-
-NIS2 Compliance: Article 21.2(h) - Encryption (data at rest)
 """
 
 import sys
@@ -51,8 +49,6 @@ Sensitive fields include:
 
 Environment variables (${env:VAR}) and credential references (${credential:key})
 are NOT encrypted, as they are resolved at runtime.
-
-NIS2 Compliance: Article 21.2(h) - Encryption at rest
         """
     )
 

@@ -5,8 +5,6 @@ Implements three roles:
 - Admin: Full system access (read, write, configure, manage users, start/stop, delete)
 - Operator: Can view and control sources (read, write, start/stop)
 - Viewer: Read-only access
-
-NIS2 Compliance: Article 21.2(g) - Access Control
 """
 
 import logging

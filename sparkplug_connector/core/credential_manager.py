@@ -1,6 +1,6 @@
 """Secure credential management with Fernet encryption.
 
-Combines best practices from both iot_connector and ot_simulator:
+Features:
 - Fernet AES-256-CBC encryption
 - PBKDF2 key derivation (480k iterations)
 - Per-installation salt

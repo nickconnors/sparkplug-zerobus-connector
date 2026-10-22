@@ -1,13 +1,11 @@
 """
-TLS/SSL Certificate Management for NIS2 Compliance.
+TLS/SSL Certificate Management.
 
 Provides:
 - Self-signed certificate generation for development
 - Certificate validation and expiration checking
 - TLS configuration for web server
 - Certificate renewal automation
-
-NIS2 Compliance: Article 21.2(h) - Encryption (data in transit)
 """
 
 import os
@@ -336,7 +334,7 @@ class TLSManager:
             # Load certificate and key
             context.load_cert_chain(str(cert_file), str(key_file))
 
-            # Security settings (NIS2 compliant)
+            # Security settings
             context.minimum_version = ssl.TLSVersion.TLSv1_2  # Minimum TLS 1.2
             context.maximum_version = ssl.TLSVersion.TLSv1_3  # Prefer TLS 1.3
 

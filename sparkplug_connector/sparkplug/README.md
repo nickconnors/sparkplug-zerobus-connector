@@ -1,4 +1,4 @@
-# Sparkplug B source
+# Sparkplug B source: the reference
 
 A `sparkplug` source connects the connector to an MQTT server that carries **Sparkplug B** (for example
 Ignition with MQTT Transmission publishing to a Chariot MQTT server, or any other
@@ -13,8 +13,8 @@ Sparkplug 3.0 edge) and writes **one row per Sparkplug message** to a Delta tabl
 - **NBIRTH procedure call**: on each edge node birth it can call a stored procedure of yours, by default
   `create_edge_node_schema`, to (re)build per-model views.
 
-A Sparkplug source runs alone or next to the connector's OPC-UA, MQTT and Modbus sources (each target
-table has its own queue).
+Several sources can run in one connector (each target table has its own queue and writer). Running it,
+Docker and the web UI: the [repository README](../../README.md).
 
 ## What gets stored
 
@@ -28,8 +28,7 @@ table has its own queue).
 Stored: births, deaths and data of edge nodes and devices (NBIRTH, NDATA, NDEATH, DBIRTH, DDATA,
 DDEATH). Skipped (counted; the last two also logged): host
 STATE messages, other namespaces, commands (NCMD, DCMD), malformed `spBv1.0/...` topics and payloads that
-can't be decoded. Sparkplug rows bypass the connector's vendor detection and tag normalization: the
-payload is kept whole, and splitting it into metrics is left to SQL.
+can't be decoded. The payload is kept whole: splitting it into metrics is left to SQL.
 
 ## Databricks setup
 
@@ -78,13 +77,13 @@ the node catalog.
 sources:
   - name: chariot-sparkplug
     protocol: sparkplug
-    endpoint: mqtt://chariot:1883          # or mqtts://host:8883 (TLS settings as for the mqtt source)
+    endpoint: mqtt://chariot:1883          # or mqtts://host:8883 (TLS: security:, below)
     # target_table: bridge_stage_db.stage_db.sparkplug_raw   # its own table; default: zerobus.default_target
     client_id: databricks-sparkplug        # fixed and unique
     username: ...                          # ACL: subscribe spBv1.0/#, publish its own STATE topic
     password: ...
     # topics: ["spBv1.0/#"]                # default; qos defaults to 0 (Sparkplug publishes at QoS 0)
-    primary_host_id: databricks-zerobus    # = the edges' Primary Host ID; omit: not a primary host
+    primary_host_id: databricks-zerobus    # = the edges' Primary Host ID; omit: a plain subscriber
     state_format: v3                       # v3: spBv1.0/STATE/<id> JSON; v2: legacy STATE/<id> ONLINE/OFFLINE
     offline_after_seconds: 30              # OFFLINE (and disconnect) after Zerobus writes failed this long
     online_after_seconds: 30               # ONLINE again after Zerobus has been healthy this long
@@ -93,14 +92,20 @@ sources:
       warehouse_id: ...                    # SQL warehouse; the Zerobus service principal runs the call
       procedures: [bridge_node_db.stage_db.create_edge_node_schema]   # catalog.schema.procedure, one or more
       schema_prefix: nb
+    # security:                            # TLS (protocols/mqtt_security.py); on with mqtts:// or use_tls: true
+    #   ca_cert_path: /certs/ca.pem        # a private CA (default: the system's)
+    #   client_cert_path: /certs/client.pem   # client certificate and key: mutual TLS
+    #   client_key_path: /certs/client.key
+    #   tls_version: TLSv1_2               # the minimum
+    #   check_hostname: true
+    #   insecure: false                    # true: no certificate check (testing only)
 zerobus:
   enabled: true
-  # confirmed_writes: true                 # a table that gets Sparkplug rows always has them; true: every table
   zerobus_endpoint: https://<workspace-id>.zerobus.<region>.cloud.databricks.com
   auth: {client_id: ..., client_secret: ...}   # the service principal
   # drain_timeout_seconds: 15             # on stop: write what is queued first, for at most this long
   # wal:                                  # write-ahead log: rows on disk until Zerobus acknowledged them
-  #   enabled: true                       # off by default; for the tables with confirmed writes
+  #   enabled: true                       # off by default
   #   path: wal                           # one subdirectory per target table
   #   fsync_interval_seconds: 0.2         # each row reaches the OS at once; fsync this often
   #   segment_mb: 16
@@ -143,13 +148,11 @@ one with the same id fights over STATE, and two connectors with different ids wr
 - **Stop (SIGTERM):** OFFLINE first, so the edges start buffering, then up to `drain_timeout_seconds` to
   write what is queued (with the write-ahead log, what's left is written after the next start).
 - **Tables:** a source writes to its `target_table` (`catalog.schema.table`; also in the web page's source
-  form), else to `zerobus.source_targets.<name>`, else to `zerobus.default_target`. Sparkplug rows and other
-  sources' rows can't share a table (different columns: Zerobus refuses the foreign rows, and one refused row
-  fails its whole batch): the web page refuses such a save, and a Sparkplug source configured that way in the
-  file isn't started (logged). A table that gets Sparkplug rows always has confirmed writes (the primary host
-  and the NBIRTH call need them); `zerobus.confirmed_writes` adds the other tables.
-- **Queues:** one per target table, each of the configured size; a source's rows go only to its own
-  target's queue.
+  form), else to `zerobus.source_targets.<name>`, else to `zerobus.default_target`. A table is opened when an
+  enabled source that writes to it starts (a disabled source's table only once it is enabled and started).
+- **Queues:** one per target table (`backpressure.memory_queue`: `max_size`, default 10000; `drop_policy`
+  `oldest`, `newest` or `reject` when full), in memory; a source's rows go only to its own target's queue.
+  A primary host goes OFFLINE at 80% full, so the edges buffer instead; a plain subscriber can fill it.
 - **Writes** (`core/confirmed_writer.py`): each batch is kept until Zerobus acknowledges it; on any failure
   the stream is closed and the same batch resent on a fresh one (backoff 1 s doubling to 30 s), so rows
   are written at least once with their `msg_id`. A row over Zerobus's 10,420,224-byte record limit is
@@ -180,26 +183,13 @@ under `wal`.
 
 ## Web page
 
-Both of the connector's pages (the React one at `/` once built with `npm run build -w @ot/connector-ui`
-in `webui/`, the classic one at `/legacy`, and at `/` without a React build) list Sparkplug sources with
-their state (`yes · ONLINE`) and add, edit and delete them (asking before a delete): protocol
-**MQTT (Sparkplug)**, then client id, primary host id, STATE format, offline/online seconds and the NBIRTH
-settings (switch, SQL warehouse, schema prefix, the procedure). The username and password stay in the configuration file (as for the page's MQTT sources). A
-save restarts the source and writes the file the connector was started with (`--config`): fields the form
-doesn't show and unchanged fields stay as written there, `${env:...}` placeholders included;
-`GET /api/sources` masks passwords and secrets.
-
-## Docker
-
-```
-docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=<index> .
-docker run -d --restart unless-stopped --env-file connector.env -p 127.0.0.1:8001:8001 \
-  -v "$PWD/my-config.yaml:/app/my-config.yaml" -v connector-wal:/app/wal sparkplug-zerobus --config /app/my-config.yaml
-```
-
-Python 3.12 with protobuf's upb implementation (~0.1 ms per typical DDATA, ~1 ms per 4.7 KB DBIRTH); runs
-your copy of the config (`--config`; `zerobus.wal.enabled: true` for the write-ahead log in `/app/wal`). The image doesn't build the React page: build
-it in `webui/` first to include it.
+The connector's web UI (the [repository README](../../README.md#web-ui)) lists the sources with their state
+(`yes · ONLINE`) and primary host, and adds, edits and deletes them (asking before a delete): endpoint,
+target table, client id, primary host id, STATE format, offline/online seconds and the NBIRTH settings
+(switch, SQL warehouse, schema prefix, the procedure). The username, password, topics and TLS settings stay
+in the configuration file. A save restarts the source and writes the file the connector was started with
+(`--config`): fields the form doesn't show and unchanged fields stay as written there, `${env:...}`
+placeholders included; `GET /api/sources` masks passwords and secrets.
 
 ## Limitations
 
@@ -209,6 +199,9 @@ it in `webui/` first to include it.
 - **Number spelling**: the JSON spells numbers as Tahu does on Java 17; from 2^63 up, a few floats and
   doubles would get a different last digit than on Java 19+ (`java_format.py`).
 - **No live log view** on the web page (logs go to the console and the connector's log files).
+- **No rebirth requests**: the connector never sends NCMD. As a plain subscriber it sees births only when
+  the edges send them (press Rebirth after starting it).
+- **No HTTPS proxy setting** for Zerobus.
 
 ## Files
 
@@ -217,5 +210,5 @@ for the EPL-2.0 parts), `host.py` (STATE, HostState, HostSupervisor), `edge_node
 calls), `../protocols/sparkplug_client.py` (the source), `../core/confirmed_writer.py`, `../core/wal.py`.
 Tests: `tests/` (Eclipse Tahu's Java implementation as the reference, through JPype:
 `java_tahu.py`; a real Mosquitto for the primary host: `test_primary_host.py`; test-only dependencies in
-its `requirements.txt`). The payload fixtures are synthetic, shaped like MQTT Transmission's
+`tests/requirements.txt`). The payload fixtures are synthetic, shaped like MQTT Transmission's
 (`make_fixtures.py`); `make_expected.py` writes Java Tahu's JSON for them.

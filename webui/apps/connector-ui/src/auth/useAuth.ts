@@ -24,7 +24,7 @@ export function useAuth() {
         if (cancelled) return;
         setAuthStatus(st);
 
-        // Mirror legacy behavior: if auth is disabled, grant all permissions.
+        // If auth is disabled, grant all permissions.
         if (!st.auth_enabled) {
           setPermissions(ALL_PERMS);
           setLoading(false);
@@ -42,7 +42,7 @@ export function useAuth() {
         setPermissions((p.permissions ?? []) as string[]);
         setLoading(false);
       } catch (e) {
-        // If the backend says auth is required, redirect like legacy.
+        // If the backend says auth is required, redirect to the login.
         if (e instanceof AuthRequiredError) {
           window.location.href = "/static/login.html";
           return;

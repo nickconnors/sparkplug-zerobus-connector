@@ -1,5 +1,5 @@
 """
-MQTT TLS Security Configuration for NIS2 Compliance.
+MQTT TLS Security Configuration.
 
 Provides:
 - TLS/SSL encryption for MQTT connections
@@ -7,8 +7,6 @@ Provides:
 - Username/password authentication
 - CA certificate validation
 - Secure cipher configuration
-
-NIS2 Compliance: Article 21.2(h) - Encryption (data in transit)
 """
 
 import ssl

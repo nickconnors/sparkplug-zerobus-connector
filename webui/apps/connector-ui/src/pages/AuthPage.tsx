@@ -30,7 +30,7 @@ export function AuthPage() {
     try {
       const res = await connectorApi.logout();
       toast.show(String((res as any)?.message ?? "Logged out"), "warn");
-      // follow legacy behavior: send user to login page
+      // send the user to the login page
       window.location.href = "/static/login.html";
     } catch (e) {
       toast.show(e instanceof Error ? e.message : "Logout failed", "bad");

@@ -1,13 +1,11 @@
 """
-Configuration File Encryption for NIS2 Compliance.
+Configuration File Encryption.
 
 Provides:
 - Encryption of sensitive configuration fields
 - Selective field encryption (encrypt only sensitive data)
 - Environment variable substitution
 - Backward compatibility with unencrypted configs
-
-NIS2 Compliance: Article 21.2(h) - Encryption (data at rest)
 """
 
 import os

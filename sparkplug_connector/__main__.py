@@ -81,7 +81,7 @@ class Connector:
         else:
             logger.info("Bridge autostart disabled (web UI / diagnostics mode)")
 
-        # Start log maintenance task (NIS2 compliance - log retention)
+        # Start log maintenance task
         self._log_maintenance_task = asyncio.create_task(
             logging_manager.start_maintenance_task()
         )

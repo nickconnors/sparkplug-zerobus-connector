@@ -7,8 +7,6 @@ Supports:
 - MFA verification from OAuth tokens
 - Session management with encrypted cookies
 - Login/logout flows
-
-NIS2 Compliance: Article 21.2(g) - Access Control & MFA
 """
 
 import logging

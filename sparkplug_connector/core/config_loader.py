@@ -1,7 +1,7 @@
 """Configuration loader with credential injection support.
 
 Loads configuration from YAML files and injects credentials from secure storage.
-Supports encrypted configuration fields for NIS2 compliance.
+Supports encrypted configuration fields.
 """
 
 import logging
@@ -65,7 +65,7 @@ class ConfigLoader:
         if not config:
             raise ValueError(f"Empty configuration file: {self.config_path}")
 
-        # Decrypt encrypted fields (NIS2 compliance - Article 21.2(h))
+        # Decrypt encrypted fields)
         if decrypt_config and self.config_encryption:
             config = self.config_encryption.decrypt_config(config)
 

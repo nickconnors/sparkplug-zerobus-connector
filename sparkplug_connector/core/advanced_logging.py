@@ -5,11 +5,9 @@ Features:
 - Automatic log rotation (size-based and time-based)
 - Log compression and archiving
 - Retention policy enforcement
-- Audit trail for compliance
+- Audit trail
 - Performance metrics logging
 - Log analysis utilities
-
-NIS2 Compliance: Article 21.2(f) - Logging and Monitoring
 """
 
 import asyncio
@@ -59,7 +57,7 @@ class LogRotationConfig:
 
 @dataclass
 class AuditLogEntry:
-    """Audit trail log entry for compliance."""
+    """Audit trail log entry."""
 
     timestamp: str
     correlation_id: str
@@ -375,7 +373,7 @@ class AdvancedLoggingManager:
 
     def _setup_audit_logger(self) -> logging.Logger:
         """
-        Setup audit trail logger (NIS2 compliance).
+        Setup audit trail logger.
 
         Returns:
             Configured audit logger
@@ -441,7 +439,7 @@ class AdvancedLoggingManager:
 
     def log_audit(self, entry: AuditLogEntry):
         """
-        Log an audit trail entry (NIS2 compliance).
+        Log an audit trail entry.
 
         Args:
             entry: Audit log entry

@@ -16,7 +16,7 @@ async function parseBody(resp: Response): Promise<unknown> {
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<unknown> {
   const resp = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
-    credentials: "include", // cookie-based auth like legacy UI
+    credentials: "include", // cookie-based auth (the login's session cookie)
     ...options,
   });
 
