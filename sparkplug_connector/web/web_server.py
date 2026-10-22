@@ -488,9 +488,11 @@ class WebServer:
         checks: dict[str, object] = {}
 
         if _has_value(zerobus_endpoint):
+            # the endpoint may be written with or without https:// (the SDK takes both)
+            zerobus_host = (urlparse(zerobus_endpoint).netloc or zerobus_endpoint).split(':', 1)[0]
             dns, tcp = await asyncio.gather(
-                _dns_check(zerobus_endpoint),
-                _tcp_check(zerobus_endpoint),
+                _dns_check(zerobus_host),
+                _tcp_check(zerobus_host),
             )
             checks['zerobus_dns_ok'] = dns['ok']
             if dns.get('addresses'):

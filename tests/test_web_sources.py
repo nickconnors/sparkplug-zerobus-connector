@@ -356,3 +356,13 @@ async def test_saving_zerobus_credentials_never_writes_the_secret_to_the_file(pa
     async with http.get("/api/zerobus/config") as r:
         shown = (await r.json())["auth"]
     assert "new-secret" not in str(shown)
+
+
+@pytest.mark.parametrize("endpoint", ["https://localhost", "localhost"])
+async def test_the_zerobus_diagnostics_check_the_endpoint_s_host_with_or_without_https(page, started, endpoint):
+    http, path, bridge = page
+    async with http.post("/api/zerobus/config", json={"zerobus_endpoint": endpoint}) as r:
+        assert r.status == 200, await r.text()
+    async with http.get("/api/zerobus/diagnostics") as r:
+        checks = (await r.json())["checks"]
+    assert checks["zerobus_dns_ok"] is True, checks           # "https://localhost" itself isn't a host name
