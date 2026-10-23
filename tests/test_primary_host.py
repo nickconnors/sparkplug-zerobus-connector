@@ -321,3 +321,70 @@ async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_
         await bridge.stop()
     off = json.loads(await await_retained(mosquitto, STATE_V3, lambda v: not json.loads(v)["online"]))
     assert off["timestamp"] >= on["timestamp"]                       # stopping publishes OFFLINE first
+
+
+# ----------------------------------------------------------------------------- rebirth requests on request
+
+async def test_an_operators_rebirth_request_is_the_ncmd_sent_at_once(mosquitto):
+    from sparkplug_connector.sparkplug import sparkplug_b_pb2 as pb
+
+    c, _ = host(mosquitto, sequence_handling="keep_all", block_auto_rebirth=True)   # not automatic: not blocked
+    task = await online(c)
+    ncmds: list = []
+    try:
+        async with aiomqtt.Client("127.0.0.1", mosquitto, identifier="edge") as edge:
+            await edge.subscribe("spBv1.0/Plant1/NCMD/#")
+
+            async def listen():
+                async for m in edge.messages:
+                    ncmds.append((m.topic.value, m.qos, m.retain, pb.Payload.FromString(m.payload)))
+            listener = asyncio.create_task(listen())
+            assert await c.request_rebirth("Plant1", "Line A") == (True, "NCMD sent on spBv1.0/Plant1/NCMD/Line A")
+            await wait_for(lambda: ncmds, 5)
+            listener.cancel()
+        (topic, qos, retain, p), = ncmds
+        assert (topic, qos, retain, p.HasField("seq")) == ("spBv1.0/Plant1/NCMD/Line A", 0, False, False)
+        assert [(m.name, m.datatype, m.boolean_value) for m in p.metrics] == [("Node Control/Rebirth", 11, True)]
+        assert c.stats()["rebirth_requests_on_request"] == 1 and c.stats()["rebirth_requests_sent"] == 1
+    finally:
+        await offline(c, task)
+
+
+async def test_an_operators_rebirth_request_needs_a_connection_valid_ids_and_unrefused_ncmds(mosquitto):
+    c, _ = host(mosquitto)
+    assert await c.request_rebirth("Plant1", "Line A") == (False, "not connected")
+    task = await online(c)
+    try:
+        for group, edge in (("Plant1", ""), ("Plant/1", "Line A"), ("Plant1", "Line+"), (None, "Line A")):
+            with pytest.raises(ValueError):
+                await c.request_rebirth(group, edge)
+        c.rebirth_refused = True
+        sent, why = await c.request_rebirth("Plant1", "Line A")
+        assert not sent and "refused" in why and c.stats()["rebirth_requests_sent"] == 0
+    finally:
+        await offline(c, task)
+
+
+async def test_after_an_operators_rebirth_request_no_automatic_one_follows_within_5_s(mosquitto):
+    from sparkplug_connector.sparkplug import sparkplug_b_pb2 as pb
+
+    c, _ = host(mosquitto)
+    task = await online(c)
+    ncmds: list = []
+    try:
+        async with aiomqtt.Client("127.0.0.1", mosquitto, identifier="edge") as edge:
+            await edge.subscribe("spBv1.0/Plant1/NCMD/#")
+
+            async def listen():
+                async for m in edge.messages:
+                    ncmds.append(m.topic.value)
+            listener = asyncio.create_task(listen())
+            assert (await c.request_rebirth("Plant1", "Line A"))[0]
+            # data from the edge node, never born: an automatic request at once, unless one went out < 5 s ago
+            await edge.publish("spBv1.0/Plant1/NDATA/Line A", pb.Payload(timestamp=1, seq=0).SerializeToString())
+            await wait_for(lambda: c.stats()["rebirth_requests_rate_limited"] == 1, 5)
+            await asyncio.sleep(0.3)
+            listener.cancel()
+        assert ncmds == ["spBv1.0/Plant1/NCMD/Line A"]
+    finally:
+        await offline(c, task)

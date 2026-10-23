@@ -196,6 +196,11 @@ tested against Tahu's own classes. They hold as a plain subscriber and as primar
   publish rights on `spBv1.0/+/NCMD/+`: Chariot closes the connection on a publish its ACL refuses, so when the
   connection is lost within 2 s of an NCMD twice in a row, the source sends no more until it restarts, logs an
   ERROR naming the ACL and writes every message from then on (`keep_all`).
+- **On request:** an operator can ask an edge node for a rebirth (the web page's **Edge nodes**, or
+  `POST /api/sources/<source>/rebirth` with `{"group_id": ..., "edge_node_id": ...}`; the start/stop
+  permission): the same NCMD, sent at once (an automatic one for that edge node then waits the 5 s). It isn't an
+  automatic request, so `block_auto_rebirth` doesn't stop it;
+  after a refusal (above) none is sent. The connector sends no other commands: no DCMD and no metric writes.
 - **`keep_all`:** every message gets its row at once; the same decisions run alongside, so the rebirth requests are
   the same and the health counts what strict would have dropped. `block_auto_rebirth: true` (no rebirth requests)
   needs it: strict ends an edge node's drops only with a rebirth.
@@ -219,7 +224,7 @@ handling: `sequence_handling`, `messages_held`, `messages_reordered`, `messages_
 reason: `gap_timeout`, `pruned_at_nbirth`, `replaced_seq`, `no_seq`, `unknown_node`, `node_offline`,
 `unknown_device`, `device_offline`, `no_bdseq`, `bdseq_mismatch`, `seq_check`, `invalid_birth`, `undecodable`,
 `shutdown`; in `keep_all` what strict would drop), `rebirth_requests` (decided), `rebirth_requests_sent`,
-`..._rate_limited`, `..._blocked`, `..._failed` (not connected), `..._not_sent_refused`, `rebirth_refused` (true
+`..._rate_limited`, `..._blocked`, `..._failed` (not connected), `rebirth_requests_on_request` (the operator's), `..._not_sent_refused`, `rebirth_refused` (true
 once the MQTT server refused them), `block_auto_rebirth`, `duplicate_aliases`, `sequence_errors` (messages written
 as received because the sequencing failed). `/api/metrics`
 has the same counters under `clients.<name>.sparkplug`, the writers under `zerobus_targets` and the logs
@@ -242,7 +247,9 @@ target table, client id, primary host id, STATE format, offline/online seconds, 
 Block auto rebirth; a running source's dropped messages show next to its state. The username, password, topics and TLS settings stay
 in the configuration file. A save restarts the source and writes the file the connector was started with
 (`--config`): fields the form doesn't show and unchanged fields stay as written there, `${env:...}`
-placeholders included; `GET /api/sources` masks passwords and secrets.
+placeholders included; `GET /api/sources` masks passwords and secrets. **Edge nodes** lists each running
+source's edge nodes and devices (`GET /api/sparkplug/edge-nodes`, under *Health*) with a **Request rebirth**
+button per edge node.
 
 ## Limitations
 

@@ -17,6 +17,8 @@ In both modes, rows and rebirth requests follow Eclipse Tahu's host decisions (`
 ``keep_all``: strict needs the rebirths). A rebirth request is an NCMD on ``spBv1.0/<group>/NCMD/<edge node>`` (the
 MQTT user needs publish rights there); if the server closes the connection right after one twice in a row (Chariot's
 answer to a refused publish), the source sends no more until it restarts and writes every message (``keep_all``).
+An operator can also ask an edge node for a rebirth (``request_rebirth``: the same NCMD, sent at once; not an automatic
+request, so ``block_auto_rebirth`` doesn't stop it).
 """
 from __future__ import annotations
 
@@ -271,6 +273,7 @@ class SparkplugClient(ProtocolClient):
             "sequence_errors": self.counters["sequence_errors"],
             "block_auto_rebirth": self.block_auto_rebirth,
             "rebirth_requests_sent": self.counters["rebirth_requests_sent"],
+            "rebirth_requests_on_request": self.counters["rebirth_requests_on_request"],
             "rebirth_requests_failed": self.counters["rebirth_requests_failed"],
             "rebirth_refused": self.rebirth_refused,
             "rebirth_requests_not_sent_refused": self.counters["rebirth_requests_not_sent_refused"],
@@ -281,6 +284,23 @@ class SparkplugClient(ProtocolClient):
         return self.sequencer.edge_nodes()
 
     # ------------------------------------------------------------------ rebirth requests
+
+    async def request_rebirth(self, group_id: str, edge_node_id: str) -> tuple[bool, str]:
+        """An operator's rebirth request for an edge node: the NCMD, sent now (sent?, why not). ValueError: not a
+        group id and an edge node id."""
+        if not _valid_id(group_id) or not _valid_id(edge_node_id):
+            raise ValueError("a group id and an edge node id, without '/', '+' or '#'")
+        topic = rebirth_topic(group_id, edge_node_id)
+        if self.rebirth_refused:
+            return False, "the MQTT server refused rebirth requests (NCMD) from this source: none sent until it restarts"
+        client = self._client
+        if client is None or not self.subscribed.is_set():
+            return False, "not connected"
+        self.counters["rebirth_requests_on_request"] += 1
+        self.sequencer.rebirth_requested(group_id, edge_node_id, time.monotonic())
+        if not await self._send_rebirth(client, topic):
+            return False, f"the NCMD on {topic} wasn't sent (see the log)"
+        return True, f"NCMD sent on {topic}"
 
     def _request_rebirth(self, group_id: str, edge_node_id: str) -> None:
         """The sequencer asks an edge node for a rebirth: an NCMD (QoS 0, not retained)."""
@@ -297,16 +317,18 @@ class SparkplugClient(ProtocolClient):
         self._state_tasks.add(task)
         task.add_done_callback(self._state_tasks.discard)
 
-    async def _send_rebirth(self, client: aiomqtt.Client, topic: str) -> None:
+    async def _send_rebirth(self, client: aiomqtt.Client, topic: str) -> bool:
         self._ncmd_at = time.monotonic()
         try:
             await asyncio.wait_for(client.publish(topic, rebirth_payload(int(time.time() * 1000)), qos=0, retain=False),
                                    STATE_PUBLISH_TIMEOUT_S)
             self.counters["rebirth_requests_sent"] += 1
             logger.info("[%s] rebirth requested: NCMD on %s", self.source_name, topic)
+            return True
         except Exception as e:  # noqa: BLE001 - the connection may be going away
             self.counters["rebirth_requests_failed"] += 1
             logger.warning("[%s] rebirth request on %s not sent: %s", self.source_name, topic, e)
+            return False
 
     def _connection_lost(self) -> None:
         """The connection is lost. Right after an NCMD, twice in a row, the server refused them (Chariot closes the
@@ -393,6 +415,11 @@ def parse_endpoint(endpoint: str) -> tuple[str, int, bool]:
         except ValueError:
             return endpoint, default_port, use_tls
     return endpoint, default_port, use_tls
+
+
+def _valid_id(value: Any) -> bool:
+    """A Sparkplug group or edge node id for a topic: a non-empty string without ``/``, ``+`` or ``#``."""
+    return isinstance(value, str) and value != "" and not any(c in value for c in "/+#")
 
 
 def _flag(value: Any) -> bool:

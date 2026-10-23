@@ -197,6 +197,11 @@ class Sequencer:
                         "changed_by": n.changed_by, "bdseq": n.birth_bdseq, "devices": devices})
         return out
 
+    def rebirth_requested(self, group_id: str, edge_node_id: str, now: float) -> None:
+        """A rebirth request sent outside these decisions (an operator's): it counts for the 5 s limit, so an
+        automatic one doesn't follow right behind it."""
+        self._last_request[(group_id, edge_node_id)] = now
+
     def keep_all_from_now(self) -> list[RawRow]:
         """Switch to ``keep_all`` (rebirths can't be requested any more): the held messages get their rows now, in
         their edge nodes' ``seq`` order, and stay held for the decisions."""

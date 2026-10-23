@@ -33,6 +33,11 @@ export const connectorApi = {
     apiJson<Record<string, unknown>>(`/api/sources/${encodeURIComponent(name)}`, { method: "DELETE" }),
   startSource: (name: string) =>
     apiJson<Record<string, unknown>>(`/api/sources/${encodeURIComponent(name)}/start`, { method: "POST", body: "{}" }),
+  requestRebirth: (name: string, group_id: string, edge_node_id: string) =>
+    apiJson<{ status?: string; message?: string }>(`/api/sources/${encodeURIComponent(name)}/rebirth`, {
+      method: "POST",
+      body: JSON.stringify({ group_id, edge_node_id }),
+    }),
   stopSource: (name: string) =>
     apiJson<Record<string, unknown>>(`/api/sources/${encodeURIComponent(name)}/stop`, { method: "POST", body: "{}" }),
 

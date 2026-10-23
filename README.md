@@ -135,7 +135,7 @@ python3.12 -m venv .venv
 
 `http://127.0.0.1:8001/`: Overview (sources, Zerobus, each source's state), **Sources** (add, edit, delete,
 start, stop; the NBIRTH procedure settings), **Edge nodes** (each running source's edge nodes and devices,
-online or offline and since when), **ZeroBus** (endpoint, table, credentials, start and stop,
+online or offline and since when; a rebirth request for an edge node), **ZeroBus** (endpoint, table, credentials, start and stop,
 diagnostics), Status, Metrics, Auth. A save goes to the file the connector was started with (`--config`):
 fields the form doesn't show stay as written there, `${env:...}` placeholders included; the API never
 returns passwords or secrets. The MQTT username, password, topics and TLS settings are set in the file only.

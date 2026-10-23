@@ -22,6 +22,7 @@ export function EdgeNodesPage() {
   const { can } = useAuthState();
   const [data, setData] = useState<EdgeNodes>({});
   const [loading, setLoading] = useState(false);
+  const [asking, setAsking] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!can.read) return;
@@ -40,6 +41,21 @@ export function EdgeNodesPage() {
     const t = window.setInterval(() => refresh().catch(() => {}), 5000);
     return () => window.clearInterval(t);
   }, [refresh]);
+
+  const rebirth = useCallback(
+    async (source: string, group: string, edge: string) => {
+      setAsking(`${source}/${group}/${edge}`);
+      try {
+        const r = await connectorApi.requestRebirth(source, group, edge);
+        toast.show(r?.message ?? "Rebirth requested", "ok");
+      } catch (e) {
+        toast.show(e instanceof Error ? e.message : "Rebirth request failed", "bad");
+      } finally {
+        setAsking(null);
+      }
+    },
+    [toast]
+  );
 
   const sources = Object.entries(data);
   return (
@@ -68,12 +84,13 @@ export function EdgeNodesPage() {
                     <th style={th}>State</th>
                     <th style={th}>Since</th>
                     <th style={th}>bdSeq</th>
+                    <th style={th}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {nodes.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="muted" style={td}>
+                      <td colSpan={6} className="muted" style={td}>
                         No edge node seen yet.
                       </td>
                     </tr>
@@ -91,6 +108,15 @@ export function EdgeNodesPage() {
                         </td>
                         <td style={td}>{since(n.since_iso, n.changed_by)}</td>
                         <td style={td}>{n.bdseq ?? <span className="muted">-</span>}</td>
+                        <td style={td}>
+                          <Button
+                            type="button"
+                            onClick={() => rebirth(source, n.group_id, n.edge_node_id)}
+                            disabled={!can.start_stop || asking === `${source}/${n.group_id}/${n.edge_node_id}`}
+                          >
+                            Request rebirth
+                          </Button>
+                        </td>
                       </tr>,
                       ...n.devices.map((d) => (
                         <tr key={`${n.group_id}/${n.edge_node_id}/${d.device_id}`}>
@@ -102,6 +128,7 @@ export function EdgeNodesPage() {
                             <StatusPill kind={d.online ? "ok" : "bad"}>{d.online ? "online" : "offline"}</StatusPill>
                           </td>
                           <td style={td}>{since(d.since_iso, d.changed_by)}</td>
+                          <td style={td} />
                           <td style={td} />
                         </tr>
                       )),
@@ -116,7 +143,8 @@ export function EdgeNodesPage() {
           Driven by <code>/api/sparkplug/edge-nodes</code>: the sequencing's state (births bring edge nodes and devices
           online at their own timestamps; an NDEATH takes an edge node and its devices offline when it is received, a
           DDEATH a device at its own timestamp). Metric values aren't kept here: whether they are stale shows in the
-          tables downstream.
+          tables downstream. Request rebirth sends the edge node an NCMD <code>Node Control/Rebirth</code> (needs the
+          start/stop permission).
         </div>
       </Panel>
     </div>

@@ -702,6 +702,7 @@ class Bridge:
                 'messages_reordered': s['messages_reordered'], 'messages_dropped': s['messages_dropped'],
                 'dropped': {k.removeprefix('dropped_'): v for k, v in s.items() if k.startswith('dropped_') and v},
                 'rebirth_requests': s['rebirth_requests'], 'rebirth_requests_sent': s['rebirth_requests_sent'],
+                'rebirth_requests_on_request': s['rebirth_requests_on_request'],
                 'rebirth_requests_rate_limited': s['rebirth_requests_rate_limited'],
                 'rebirth_requests_blocked': s['rebirth_requests_blocked'],
                 'rebirth_requests_failed': s['rebirth_requests_failed'],
@@ -745,6 +746,19 @@ class Bridge:
                     d['since_iso'] = _iso_ms(d['since'])
             out[name] = nodes
         return out
+
+    async def request_rebirth(self, source_name: str, group_id: Any, edge_node_id: Any) -> Dict[str, Any]:
+        """An operator's rebirth request: the source sends an NCMD to the edge node now."""
+        client = self.clients.get(source_name)
+        if client is None:
+            return {'status': 'error', 'code': 'not_found', 'message': f"Source not running: {source_name}"}
+        try:
+            sent, message = await client.request_rebirth(group_id, edge_node_id)
+        except ValueError as e:
+            return {'status': 'error', 'code': 'invalid', 'message': str(e)}
+        if sent:
+            logger.info(f"[{source_name}] rebirth requested by an operator: {group_id}/{edge_node_id}")
+        return {'status': 'ok' if sent else 'error', 'message': message}
 
     def get_metrics(self) -> Dict[str, Any]:
         """Metrics of the bridge, its queues, write-ahead logs, writers and sources."""

@@ -88,6 +88,13 @@ class IdleClient:
     def edge_nodes(self):
         return getattr(self, "nodes", [])
 
+    async def request_rebirth(self, group_id, edge_node_id):
+        from sparkplug_connector.protocols.sparkplug_client import _valid_id
+        if not (_valid_id(group_id) and _valid_id(edge_node_id)):
+            raise ValueError("ids")
+        self.rebirths = getattr(self, "rebirths", []) + [(group_id, edge_node_id)]
+        return getattr(self, "rebirth_answer", (True, "NCMD sent"))
+
 
 @pytest.fixture
 def started(monkeypatch):
@@ -406,3 +413,19 @@ async def test_the_edge_nodes_api_lists_each_sources_edge_nodes_and_devices_with
     assert (node["online"], node["since"], node["since_iso"], node["changed_by"]) == \
         (False, 1790696925611, "2026-09-29T15:48:45.611Z", "NDEATH")
     assert node["devices"][0]["since_iso"] == "2026-09-29T15:48:45.011Z"
+
+
+async def test_the_rebirth_api_asks_the_source_for_an_ncmd(page):
+    http, path, bridge = page
+    async with http.post("/api/sources/sp/rebirth", json={"group_id": "G", "edge_node_id": "E"}) as r:
+        assert (r.status, await r.json()) == (200, {"status": "ok", "message": "NCMD sent"})
+    assert bridge.clients["sp"].rebirths == [("G", "E")]
+    bridge.clients["sp"].rebirth_answer = (False, "not connected")
+    async with http.post("/api/sources/sp/rebirth", json={"group_id": "G", "edge_node_id": "E"}) as r:
+        assert (r.status, (await r.json())["message"]) == (409, "not connected")
+    async with http.post("/api/sources/sp/rebirth", json={"group_id": "G", "edge_node_id": "E/1"}) as r:
+        assert r.status == 400
+    async with http.post("/api/sources/sp/rebirth", data="not json") as r:
+        assert r.status == 400
+    async with http.post("/api/sources/nope/rebirth", json={"group_id": "G", "edge_node_id": "E"}) as r:
+        assert r.status == 404
