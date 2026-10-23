@@ -192,6 +192,36 @@ def template_metrics() -> bytes:
     )
 
 
+def untyped_metrics() -> bytes:
+    """Metrics without a datatype (allowed outside births), for decoding with a birth's types (UNTYPED_TYPES)."""
+    no_name = pb.Payload.Metric(datatype=0, alias=7, int_value=5)
+    no_name_no_alias = pb.Payload.Metric(datatype=0, int_value=1)
+    motor = pb.Payload.Template(template_ref="Motor", metrics=[metric("rpm", 0, timestamp=TS, int_value=3),
+                                                              metric("temp", 9, timestamp=TS, float_value=20.5)])
+    pump = pb.Payload.Template(template_ref="Pump", metrics=[metric("flow", 0, timestamp=TS, double_value=0.25)])
+    broken = pb.Payload.Template(template_ref="Broken", metrics=[metric("nope", 0, timestamp=TS, int_value=1)])
+    return payload(
+        metric("Speed", 0, timestamp=TS, float_value=1.5),
+        no_name,
+        metric("Missing", 0, timestamp=TS, double_value=2.0),
+        metric("Missing null", 0, timestamp=TS, is_null=True),
+        metric("Null typed", 0, timestamp=TS, is_null=True),
+        metric("Weird", 20, timestamp=TS, int_value=1),
+        metric("Weird null", 20, timestamp=TS, is_null=True),
+        no_name_no_alias,
+        metric("Motor", 19, timestamp=TS, template_value=motor),
+        metric("Pump", 0, timestamp=TS, template_value=pump),
+        metric("Broken", 19, timestamp=TS, template_value=broken),
+        metric("Bool", 0, timestamp=TS, boolean_value=True),
+    )
+
+
+# the types a birth would have given untyped_metrics()'s metrics (names; template members as <template>/<member>)
+UNTYPED_NAMES = {"Speed": 9, "Null typed": 12, "Weird": 3, "Weird null": 3, "Motor/rpm": 3, "Pump": 19, "Pump/flow": 10,
+                 "Bool": 11}
+UNTYPED_ALIASES = {7: 3}
+
+
 def property_metrics() -> bytes:
     inner = props(("engUnit", pv(12, string_value="degC")), ("engHigh", pv(10, double_value=100.0)))
     every = props(

@@ -20,6 +20,7 @@ import make_fixtures
 import payloads
 from conftest import EXPECTED, FIXTURES
 from sparkplug_connector.sparkplug import TahuDecodeError, tahu_json, to_tahu_json
+from sparkplug_connector.sparkplug.tahu_json import MetricTypes
 from sparkplug_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
 
 TRANSMISSION = sorted((FIXTURES / "transmission").glob("*.bin"))
@@ -83,6 +84,69 @@ def test_resent_event_log_keeps_its_shape():
 def test_case_matches_java(java_tahu, name: str):
     raw = CASES[name]
     _assert_same(_outcome(java_tahu.to_tahu_json, raw), _outcome(to_tahu_json, raw))
+
+
+# ----------------------------------------------------------------------------- the births' types (a host's MetricDataTypeMap)
+
+def _types(names: dict | None = None, aliases: dict | None = None) -> MetricTypes:
+    t = MetricTypes()
+    t.names.update(names or {})
+    t.aliases.update(aliases or {})
+    return t
+
+
+UNTYPED_TYPES = _types(payloads.UNTYPED_NAMES, payloads.UNTYPED_ALIASES)
+
+
+@pytest.mark.parametrize("types", [None, _types(), UNTYPED_TYPES], ids=["no types", "empty", "the births' types"])
+@pytest.mark.parametrize("compress", [False, True], ids=["plain", "compressed"])
+def test_untyped_metrics_match_java(java_tahu, types, compress):
+    raw = payloads.untyped_metrics()
+    if compress:
+        raw = payloads.compressed(raw)
+    java = _outcome(lambda b: java_tahu.to_tahu_json(b, types), raw)
+    assert java[0] == "json"
+    assert _outcome(lambda b: to_tahu_json(b, types), raw) == java
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_case_matches_java_with_types(java_tahu, name: str):
+    """Every case again with types for some of their names (types only change metrics sent without a datatype)."""
+    types = _types({"unknown": 3, "UDT with an unknown-type member/unknown": 9, "member": 12}, {0: 3, 1: 9})
+    raw = CASES[name]
+    _assert_same(_outcome(lambda b: java_tahu.to_tahu_json(b, types), raw), _outcome(lambda b: to_tahu_json(b, types), raw))
+
+
+def test_untyped_metrics_take_the_births_types():
+    raw = payloads.untyped_metrics()
+    plain = json.loads(to_tahu_json(raw))["metrics"]
+    typed = json.loads(to_tahu_json(raw, UNTYPED_TYPES))["metrics"]
+    assert plain.count(None) == 10                  # every untyped metric is null without types
+    by_name = {m.get("name", f"alias {m.get('alias')}") if m else None: m for m in typed}
+    assert by_name["Speed"]["dataType"] == "Float" and by_name["Speed"]["value"] == 1.5
+    assert by_name["alias 7"] == {"alias": 7, "dataType": "Int32", "value": 5}
+    assert by_name["Null typed"]["dataType"] == "String" and by_name["Null typed"]["value"] is None
+    assert by_name["Weird null"]["dataType"] == "Int32" and by_name["Weird null"]["value"] is None
+    assert [(m["name"], m["dataType"], m["value"]) for m in by_name["Motor"]["value"]["metrics"]] == [("rpm", "Int32", 3), ("temp", "Float", 20.5)]
+    assert by_name["Pump"]["dataType"] == "Template" and by_name["Pump"]["value"]["metrics"][0]["value"] == 0.25
+    assert by_name["Bool"]["value"] is True
+    # left out: not in the types (also with a null value), a value the unknown datatype code can't give, a
+    # template with such a member; still null: no name and no alias
+    assert not {"Missing", "Missing null", "Weird", "Broken"} & set(by_name) and None in by_name
+
+
+def test_untyped_tells_whether_types_could_change_the_payload():
+    raw = payloads.untyped_metrics()
+    assert tahu_json.untyped(tahu_json.decode(raw))
+    assert tahu_json.untyped(tahu_json.decode(raw, UNTYPED_TYPES))          # no name and no alias stays null
+    member_only = payloads.payload(payloads.metric("Motor", 19, template_value=dpb_template_with_untyped_member()))
+    assert tahu_json.untyped(tahu_json.decode(member_only))
+    assert not tahu_json.untyped(tahu_json.decode(member_only, _types({"Motor/rpm": 3})))
+    assert not tahu_json.untyped(tahu_json.decode(payloads.int_metrics()))
+
+
+def dpb_template_with_untyped_member():
+    return payloads.pb.Payload.Template(template_ref="Motor", metrics=[payloads.metric("rpm", 0, int_value=3)])
 
 
 def _metrics(raw: bytes) -> dict:
