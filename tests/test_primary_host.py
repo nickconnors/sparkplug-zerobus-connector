@@ -177,6 +177,30 @@ async def test_sparkplug_messages_become_rows(mosquitto):
         await offline(c, task)
 
 
+async def test_as_primary_host_too_an_edge_node_in_mid_session_is_asked_for_a_rebirth(mosquitto, monkeypatch):
+    from sparkplug_connector.protocols import sparkplug_client
+    from sparkplug_connector.sparkplug import sparkplug_b_pb2 as pb
+
+    monkeypatch.setattr(sparkplug_client, "TICK_S", 0.05)
+    c, rows = host(mosquitto, sequence_reordering_timeout=200)
+    task = await online(c)
+    ncmds: list = []
+    try:
+        async with aiomqtt.Client("127.0.0.1", mosquitto, identifier="edge") as edge:
+            await edge.subscribe("spBv1.0/Plant1/NCMD/#")
+
+            async def listen():
+                async for m in edge.messages:
+                    ncmds.append(m.topic.value)
+            listener = asyncio.create_task(listen())
+            await edge.publish("spBv1.0/Plant1/DDATA/Line A/M100", pb.Payload(timestamp=1, seq=42).SerializeToString())
+            await wait_for(lambda: ncmds, 5)
+            listener.cancel()
+        assert ncmds == ["spBv1.0/Plant1/NCMD/Line A"] and not rows and c.is_online
+    finally:
+        await offline(c, task)
+
+
 # ----------------------------------------------------------------------------- the bridge: OFFLINE while writes fail
 
 async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_they_recover(mosquitto, monkeypatch):
