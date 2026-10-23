@@ -245,12 +245,11 @@ connector without `primary_host_id` is a Sparkplug subscriber, not a Sparkplug 3
 ## Provenance
 
 This connector is derived from [pravinva/unified-ot-zerobus-connector](https://github.com/pravinva/unified-ot-zerobus-connector)
-(an OPC-UA, MQTT and Modbus connector with a web UI and the Zerobus write path), through the fork
-[nickconnors/unified-ot-zerobus-connector](https://github.com/nickconnors/unified-ot-zerobus-connector),
-which added the Sparkplug B source, confirmed writes, the write-ahead log, the primary host and the NBIRTH
-calls. This repository starts from that fork's `main` at
-[`e269da9`](https://github.com/nickconnors/unified-ot-zerobus-connector/commit/e269da9890cff1d038756d26d1423b9e7de3e58b),
-history included, and keeps only the Sparkplug B path: the other protocols, discovery, tag normalization,
+(an OPC-UA, MQTT and Modbus connector with a web UI and the Zerobus write path), through a fork of it (no longer
+published) which added the Sparkplug B source, confirmed writes, the write-ahead log, the primary host and the
+NBIRTH calls. This repository starts from that fork's `main` at
+[`e269da9`](https://github.com/nickconnors/sparkplug-zerobus-connector/commit/e269da9890cff1d038756d26d1423b9e7de3e58b),
+history included (the commits before it are the original's and the fork's), and keeps only the Sparkplug B path: the other protocols, discovery, tag normalization,
 numeric compression, the OT simulator and the unused security modules were removed.
 
 ## License
