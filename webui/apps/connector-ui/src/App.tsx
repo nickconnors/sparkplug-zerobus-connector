@@ -7,6 +7,7 @@ import { NavProvider } from "./nav/NavContext";
 
 const OverviewPage = lazy(() => import("./pages/OverviewPage").then((m) => ({ default: m.OverviewPage })));
 const SourcesPage = lazy(() => import("./pages/SourcesPage").then((m) => ({ default: m.SourcesPage })));
+const EdgeNodesPage = lazy(() => import("./pages/EdgeNodesPage").then((m) => ({ default: m.EdgeNodesPage })));
 const ZeroBusPage = lazy(() => import("./pages/ZeroBusPage").then((m) => ({ default: m.ZeroBusPage })));
 const StatusPage = lazy(() => import("./pages/StatusPage").then((m) => ({ default: m.StatusPage })));
 const MetricsPage = lazy(() => import("./pages/MetricsPage").then((m) => ({ default: m.MetricsPage })));
@@ -15,6 +16,7 @@ const AuthPage = lazy(() => import("./pages/AuthPage").then((m) => ({ default: m
 type NavKey =
   | "overview"
   | "sources"
+  | "edge-nodes"
   | "zerobus"
   | "status"
   | "metrics"
@@ -22,13 +24,14 @@ type NavKey =
 
 function loadNavKey(): NavKey {
   const v = window.localStorage.getItem("connector-ui.nav");
-  const allowed: NavKey[] = ["overview", "sources", "zerobus", "status", "metrics", "auth"];
+  const allowed: NavKey[] = ["overview", "sources", "edge-nodes", "zerobus", "status", "metrics", "auth"];
   return (allowed.includes(v as NavKey) ? (v as NavKey) : "overview");
 }
 
 function App() {
   const [active, setActive] = useState<NavKey>(() => loadNavKey());
   const toastApi = useToast();
+  const toastCtx = useMemo(() => ({ show: toastApi.show }), [toastApi.show]);
   const auth = useAuth();
 
   useEffect(() => {
@@ -39,6 +42,7 @@ function App() {
     () => [
       { key: "overview", label: "Overview" },
       { key: "sources", label: "Sources" },
+      { key: "edge-nodes", label: "Edge nodes" },
       { key: "zerobus", label: "ZeroBus" },
       { key: "status", label: "Status" },
       { key: "metrics", label: "Metrics" },
@@ -49,7 +53,7 @@ function App() {
 
   return (
     <>
-      <ToastProvider api={{ show: toastApi.show }}>
+      <ToastProvider api={toastCtx}>
         <AuthProvider value={auth}>
           <NavProvider api={{ go: (k) => setActive(k as NavKey) }}>
           <AppShell
@@ -69,6 +73,7 @@ function App() {
         <Suspense fallback={<div className="muted">Loading…</div>}>
           {active === "overview" && <OverviewPage />}
           {active === "sources" && <SourcesPage />}
+          {active === "edge-nodes" && <EdgeNodesPage />}
           {active === "zerobus" && <ZeroBusPage />}
           {active === "status" && <StatusPage />}
           {active === "metrics" && <MetricsPage />}

@@ -173,6 +173,7 @@ class WebServer:
             # Monitoring
             web.get('/api/metrics', self.get_metrics),
             web.get('/api/sparkplug/health', self.get_sparkplug_health),
+            web.get('/api/sparkplug/edge-nodes', self.get_sparkplug_edge_nodes),
             web.get('/api/status', self.get_status),
 
             # Health
@@ -699,6 +700,15 @@ class WebServer:
             return web.json_response(self.bridge.sparkplug_health())
         except Exception as e:
             logger.error(f"Failed to get Sparkplug health: {e}", exc_info=True)
+            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+
+    @require_permission(Permission.READ)
+    async def get_sparkplug_edge_nodes(self, request: web.Request) -> web.Response:
+        """Per Sparkplug source: its edge nodes and devices, online or offline, since when."""
+        try:
+            return web.json_response(self.bridge.sparkplug_edge_nodes())
+        except Exception as e:
+            logger.error(f"Failed to get the Sparkplug edge nodes: {e}", exc_info=True)
             return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
     @require_permission(Permission.READ)

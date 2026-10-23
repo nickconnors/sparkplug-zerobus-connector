@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export type ToastKind = "ok" | "warn" | "bad";
 
@@ -11,11 +11,10 @@ export function useToast() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  return {
-    toast,
-    show: (message: string, kind: ToastKind = "ok") => setToast({ message, kind }),
-    clear: () => setToast(null),
-  };
+  // stable functions: pages depend on them (a new one per render re-ran their effects at every toast)
+  const show = useCallback((message: string, kind: ToastKind = "ok") => setToast({ message, kind }), []);
+  const clear = useCallback(() => setToast(null), []);
+  return { toast, show, clear };
 }
 
 export function Toast(props: { toast: { message: string; kind: ToastKind } | null }) {

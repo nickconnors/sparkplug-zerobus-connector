@@ -32,6 +32,14 @@ logger = logging.getLogger(__name__)
 HEALTHY_SESSION_S = 60.0   # a source connection that lasted this long starts its reconnect backoff again
 
 
+def _iso_ms(ms: Optional[float]) -> Optional[str]:
+    """Epoch milliseconds as UTC ISO 8601 with milliseconds (None stays None)."""
+    if ms is None:
+        return None
+    ms = int(ms)
+    return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(ms // 1000)) + f".{ms % 1000:03d}Z"
+
+
 def _enabled(value: Any) -> bool:
     """A config switch that may come from the environment as a string."""
     return str(value).strip().lower() not in ('false', '0', 'no', 'off', '', 'none')
@@ -676,7 +684,7 @@ class Bridge:
     def sparkplug_health(self) -> Dict[str, Dict[str, Any]]:
         """Per Sparkplug source: host state, MQTT, rows, Zerobus writer, NBIRTH calls, write-ahead log."""
         def iso(t):
-            return None if t is None else time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(t)) + f".{int(t % 1 * 1000):03d}Z"
+            return None if t is None else _iso_ms(t * 1000)
         out: Dict[str, Dict[str, Any]] = {}
         for name, client in self.clients.items():
             s = client.stats()
@@ -724,6 +732,18 @@ class Bridge:
                           'edge_node_schema_failures': n.failures, 'edge_node_schema_gave_up': n.gave_up,
                           'edge_node_schema_pending': n.pending, 'edge_node_schema_last_error': n.last_error})
             out[name] = h
+        return out
+
+    def sparkplug_edge_nodes(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Per Sparkplug source: its edge nodes and their devices, online or offline, since when (epoch ms and ISO)."""
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for name, client in self.clients.items():
+            nodes = client.edge_nodes()
+            for n in nodes:
+                n['since_iso'] = _iso_ms(n['since'])
+                for d in n['devices']:
+                    d['since_iso'] = _iso_ms(d['since'])
+            out[name] = nodes
         return out
 
     def get_metrics(self) -> Dict[str, Any]:

@@ -85,6 +85,9 @@ class IdleClient:
     async def disconnect(self):
         pass
 
+    def edge_nodes(self):
+        return getattr(self, "nodes", [])
+
 
 @pytest.fixture
 def started(monkeypatch):
@@ -387,3 +390,19 @@ async def test_the_zerobus_diagnostics_check_the_endpoint_s_host_with_or_without
     async with http.get("/api/zerobus/diagnostics") as r:
         checks = (await r.json())["checks"]
     assert checks["zerobus_dns_ok"] is True, checks           # "https://localhost" itself isn't a host name
+
+
+async def test_the_edge_nodes_api_lists_each_sources_edge_nodes_and_devices_with_their_times(page):
+    http, path, bridge = page
+    bridge.clients["sp"].nodes = [{"group_id": "G", "edge_node_id": "E", "online": False, "since": 1790696925611,
+                                   "changed_by": "NDEATH", "bdseq": 2,
+                                   "devices": [{"device_id": "D", "online": False, "since": 1790696925011,
+                                                "changed_by": "DDEATH"}]}]
+    async with http.get("/api/sparkplug/edge-nodes") as r:
+        assert r.status == 200
+        body = await r.json()
+    assert body["m"] == []
+    node = body["sp"][0]
+    assert (node["online"], node["since"], node["since_iso"], node["changed_by"]) == \
+        (False, 1790696925611, "2026-09-29T15:48:45.611Z", "NDEATH")
+    assert node["devices"][0]["since_iso"] == "2026-09-29T15:48:45.011Z"

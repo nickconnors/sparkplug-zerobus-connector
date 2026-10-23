@@ -225,6 +225,14 @@ as received because the sequencing failed). `/api/metrics`
 has the same counters under `clients.<name>.sparkplug`, the writers under `zerobus_targets` and the logs
 under `wal`.
 
+`GET /api/sparkplug/edge-nodes`, per Sparkplug source: each edge node the sequencing knows (`group_id`,
+`edge_node_id`, `online`, `since` in epoch ms and `since_iso`, `changed_by`, `bdseq`) and its `devices`
+(`device_id`, `online`, `since`, `since_iso`, `changed_by`), with Sparkplug 3.0's times: a birth's own
+timestamp (`NBIRTH`, `DBIRTH`), an NDEATH's receipt (the host's UTC time: the MQTT server may publish it as the
+will; its devices go offline then too), a DDEATH's timestamp, and the host's time when the reorder timeout sets an
+edge node offline (`reorder timeout`). The web page's **Edge nodes** shows the same. Metric values aren't kept,
+so nothing is marked STALE here: that shows in the tables downstream.
+
 ## Web page
 
 The connector's web UI (the [repository README](../../README.md#web-ui)) lists the sources with their state

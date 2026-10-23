@@ -418,3 +418,71 @@ def test_keep_all_from_now_writes_the_held_messages_in_seq_order():
     assert [_label(x) for x in r.s.keep_all_from_now()] == ["d3", "d4"]
     assert r.s.mode == KEEP_ALL and r.s.keep_all_from_now() == []
     assert r.send("DDATA", 9, label="d9") == ["d9"]              # every message from now on
+
+
+# ----------------------------------------------------------------------------- the edge nodes' state
+
+def node_state(r: Run, edge=EDGE):
+    return next(n for n in r.s.edge_nodes() if n["edge_node_id"] == edge)
+
+
+def test_births_bring_an_edge_node_and_its_devices_online_at_their_own_timestamps():
+    r = Run()
+    r.send("NBIRTH", 0, bdseq=3, ts=TS, at=1.0)
+    r.send("DBIRTH", 1, ts=TS + 10)
+    assert r.s.edge_nodes() == [{"group_id": GROUP, "edge_node_id": EDGE, "online": True, "since": TS,
+                                 "changed_by": "NBIRTH", "bdseq": 3,
+                                 "devices": [{"device_id": DEV, "online": True, "since": TS + 10, "changed_by": "DBIRTH"}]}]
+
+
+def test_a_ddeath_sets_the_device_offline_at_the_ddeath_timestamp():
+    r = Run()
+    born(r)
+    r.send("DDEATH", 2, ts=TS + 500, at=9.0)          # received at 9 s: the payload's time counts
+    n = node_state(r)
+    assert n["online"] and n["devices"] == [{"device_id": DEV, "online": False, "since": TS + 500, "changed_by": "DDEATH"}]
+
+
+def test_an_ndeath_sets_the_edge_node_and_its_devices_offline_at_its_receipt():
+    r = Run()
+    born(r, bdseq=4)
+    r.send("NDEATH", bdseq=4, ts=TS + 500, at=7.25)    # maybe the server's will: the host's time counts
+    n = node_state(r)
+    assert (n["online"], n["since"], n["changed_by"]) == (False, 7250, "NDEATH")
+    assert n["devices"] == [{"device_id": DEV, "online": False, "since": 7250, "changed_by": "NDEATH"}]
+
+
+def test_a_refused_death_changes_nothing():
+    r = Run()
+    born(r, bdseq=4)
+    r.send("NDEATH", bdseq=5, at=3.0)                  # not the birth's bdSeq: dropped
+    assert node_state(r)["online"] and node_state(r)["changed_by"] == "NBIRTH"
+
+
+def test_the_reorder_timeout_sets_a_known_edge_node_offline_at_the_hosts_time():
+    r = Run(clock=lambda: 1_800_000_000.5)
+    born(r)
+    r.send("NDATA", 3, at=1.0)                         # seq 2 missing
+    r.tick(7.0)
+    n = node_state(r)
+    assert (n["online"], n["since"], n["changed_by"]) == (False, 1_800_000_000_500, "reorder timeout") and r.requests
+    r.send("NBIRTH", 0, bdseq=1, ts=TS + 900, at=8.0)
+    assert (node_state(r)["online"], node_state(r)["since"]) == (True, TS + 900)
+
+
+def test_an_ndeath_keeps_the_time_of_a_device_a_ddeath_took_offline():
+    r = Run()
+    born(r, bdseq=4)
+    r.send("DDEATH", 2, ts=TS + 500, at=5.0)
+    r.send("NDEATH", bdseq=4, at=9.0)
+    assert node_state(r)["devices"] == [{"device_id": DEV, "online": False, "since": TS + 500, "changed_by": "DDEATH"}]
+
+
+def test_the_reorder_timeout_keeps_the_time_of_an_edge_node_already_offline():
+    r = Run(clock=lambda: 1_800_000_000.0)
+    born(r, bdseq=4)
+    r.send("NDATA", 3, at=1.0)                         # held: seq 2 missing
+    r.send("NDEATH", bdseq=4, at=2.0)                  # not held: the edge node offline at 2 s
+    r.tick(7.0)                                        # the held message times out
+    n = node_state(r)
+    assert (n["online"], n["since"], n["changed_by"]) == (False, 2000, "NDEATH") and r.requests

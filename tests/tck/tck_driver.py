@@ -103,6 +103,12 @@ class Tck:
             await self._client.__aexit__(None, None, None)
 
     async def _listen(self) -> None:
+        try:
+            await self._receive()
+        except aiomqtt.MqttError:       # the broker went away (the end of the session): nothing more to collect
+            pass
+
+    async def _receive(self) -> None:
         async for m in self._client.messages:
             text = bytes(m.payload).decode("utf-8", "replace")
             if m.topic.value == RESULT:

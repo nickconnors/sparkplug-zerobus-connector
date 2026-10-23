@@ -276,6 +276,10 @@ class SparkplugClient(ProtocolClient):
             "rebirth_requests_not_sent_refused": self.counters["rebirth_requests_not_sent_refused"],
         }
 
+    def edge_nodes(self) -> list[dict[str, Any]]:
+        """The edge nodes and devices seen, online or offline since when (``Sequencer.edge_nodes``)."""
+        return self.sequencer.edge_nodes()
+
     # ------------------------------------------------------------------ rebirth requests
 
     def _request_rebirth(self, group_id: str, edge_node_id: str) -> None:

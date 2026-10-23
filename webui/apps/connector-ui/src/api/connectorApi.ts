@@ -3,6 +3,7 @@ import type {
   AuthStatus,
   ConnectorMetrics,
   ConnectorStatus,
+  EdgeNodes,
   PermissionsResponse,
   SourceConfig,
   SparkplugHealth,
@@ -49,6 +50,7 @@ export const connectorApi = {
 
   // sparkplug
   getSparkplugHealth: () => apiJson<SparkplugHealth>("/api/sparkplug/health"),
+  getEdgeNodes: () => apiJson<EdgeNodes>("/api/sparkplug/edge-nodes"),
 
   // health (useful for smoke tests / boot)
   getHealth: () => apiText("/health"),

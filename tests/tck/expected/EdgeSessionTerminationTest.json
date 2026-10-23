@@ -8,10 +8,10 @@
   "Monitor:topic-structure-namespace-valid-device-id": "PASS",
   "Monitor:topic-structure-namespace-valid-edge-node-id": "PASS",
   "Monitor:topic-structure-namespace-valid-group-id": "PASS",
-  "operational-behavior-edge-node-termination-host-action-ddeath-devices-offline": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ddeath-devices-offline": "PASS",
   "operational-behavior-edge-node-termination-host-action-ddeath-devices-tags-stale": "FAIL",
-  "operational-behavior-edge-node-termination-host-action-ndeath-devices-offline": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ndeath-devices-offline": "PASS",
   "operational-behavior-edge-node-termination-host-action-ndeath-devices-tags-stale": "FAIL",
-  "operational-behavior-edge-node-termination-host-action-ndeath-node-offline": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ndeath-node-offline": "PASS",
   "operational-behavior-edge-node-termination-host-action-ndeath-node-tags-stale": "FAIL"
 }

@@ -10,8 +10,12 @@ import asyncio
 import json
 import os
 import pathlib
+import time
 
+import aiomqtt
 import pytest
+
+from sparkplug_connector.sparkplug import sparkplug_b_pb2 as pb
 
 from tck_driver import connector, dumps, source
 from tck_fixtures import brokers, tck, tck_package, tck_results  # noqa: F401 - the fixtures
@@ -84,12 +88,56 @@ async def test_send_command(tck, brokers, tck_results):
 
 
 async def test_edge_session_termination(tck, brokers, tck_results):
-    """The TCK's device dies, then its edge node: six questions, does the host mark them offline (and their
-    metrics STALE)."""
-    async with connector(source("hivemq", brokers["hivemq"], HOST_ID)):
+    """The TCK's device dies, then its edge node: six questions, does the host mark them offline (and their metrics
+    STALE). Answered from the connector's edge nodes view (``/api/sparkplug/edge-nodes``) against the deaths the TCK
+    published: a device offline at the DDEATH's timestamp, the edge node and its devices still online at the NDEATH's
+    receipt (one the DDEATH took offline keeps that time). The connector keeps no metric values (staleness shows in
+    the tables downstream): the STALE questions are FAIL."""
+    deaths: dict[str, int] = {}                 # DDEATH: its payload timestamp; NDEATH: when it was seen (ms)
+
+    async def watch(watcher):
+        async for m in watcher.messages:
+            kind = m.topic.value.split("/")[2]
+            deaths[kind] = pb.Payload.FromString(bytes(m.payload)).timestamp if kind == "DDEATH" else int(time.time() * 1000)
+
+    # the questions in the TCK's order (by position: its sixth prompt repeats the fifth's text, the STALE one isn't
+    # shown); what the connector's view must say: the edge node or the device offline, by which death
+    QUESTIONS = [("device", "DDEATH"), ("stale", None), ("node", "NDEATH"), ("stale", None), ("device", "NDEATH"),
+                 ("stale", None)]
+
+    def answer(question: int, bridge) -> bool:
+        what, death = QUESTIONS[question]
+        if what == "stale":
+            return False
+        node = next(n for n in bridge.sparkplug_edge_nodes()["hivemq"] if (n["group_id"], n["edge_node_id"]) == (GROUP, EDGE))
+        target = node if what == "node" else next(d for d in node["devices"] if d["device_id"] == DEVICE)
+        if target["online"] or death not in deaths:
+            return False
+        if death == "DDEATH":                                   # the DDEATH's timestamp
+            return target["changed_by"] == "DDEATH" and target["since"] == deaths["DDEATH"]
+        if what == "device" and target["changed_by"] == "DDEATH":   # offline already, since its DDEATH
+            return target["since"] == deaths["DDEATH"]
+        return target["changed_by"] == "NDEATH" and \
+            deaths["NDEATH"] - 2000 <= target["since"] <= deaths["NDEATH"] + 2000    # the host's time at receipt
+
+    async def answered(question: int, bridge) -> bool:
+        """The answer once the death has reached the connector and the watcher (up to 5 s; the TCK runs emulated)."""
+        if QUESTIONS[question][0] == "stale":
+            return False
+        deadline = time.monotonic() + 5
+        while not answer(question, bridge) and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        return answer(question, bridge)
+
+    async with connector(source("hivemq", brokers["hivemq"], HOST_ID)) as bridge, \
+            aiomqtt.Client("127.0.0.1", brokers["hivemq"], identifier="tck-death-watcher") as watcher:
+        for kind in ("DDEATH", "NDEATH"):
+            await watcher.subscribe(f"spBv1.0/{GROUP}/{kind}/#", qos=0)
+        watching = asyncio.create_task(watch(watcher))
         await tck.start("EdgeSessionTerminationTest", HOST_ID, GROUP, EDGE, DEVICE)
-        for _ in range(6):
+        for question in range(len(QUESTIONS)):
             await tck.prompt(30)
-            await tck.reply(False)          # the connector shows no edge node or device state
+            await tck.reply(await answered(question, bridge))
         result = await tck.result(30)
+        watching.cancel()
     check("EdgeSessionTerminationTest", result, tck_results)
