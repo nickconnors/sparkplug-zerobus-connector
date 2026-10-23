@@ -144,6 +144,80 @@ async def test_republishes_online_when_its_own_state_is_set_offline(mosquitto):
         await offline(c, task)
 
 
+async def test_subscribes_to_its_own_state_topic_even_under_the_namespace_filter(mosquitto, monkeypatch):
+    subscribed: list[str] = []
+    original = aiomqtt.Client.subscribe
+
+    async def recording(self, topic, *args, **kwargs):
+        subscribed.append(topic)
+        return await original(self, topic, *args, **kwargs)
+    monkeypatch.setattr(aiomqtt.Client, "subscribe", recording)
+    c, _ = host(mosquitto)
+    task = await online(c)
+    try:
+        assert subscribed == ["spBv1.0/#", STATE_V3]           # the Sparkplug TCK wants the STATE filter itself
+    finally:
+        await offline(c, task)
+
+
+async def test_an_offline_delivered_once_per_filter_gets_one_online(mosquitto):
+    """Mosquitto sends a message once per matching subscription: the OFFLINE comes twice (spBv1.0/# and the STATE
+    topic), ONLINE goes out once."""
+    c, _ = host(mosquitto)
+    task = await online(c)
+    published: list[dict] = []
+    try:
+        t = c.session_timestamp
+        async with aiomqtt.Client("127.0.0.1", mosquitto, identifier="watcher") as watcher:
+            await watcher.subscribe(STATE_V3, qos=1)
+
+            async def watch():
+                async for m in watcher.messages:
+                    if not m.retain:
+                        published.append(json.loads(m.payload))
+            watching = asyncio.create_task(watch())
+            await wait_for(lambda: c.counters["messages_received"] >= 1)    # its own ONLINE (twice: counted once)
+            await asyncio.sleep(0.3)
+            before = c.counters["messages_received"]
+            async with aiomqtt.Client("127.0.0.1", mosquitto, identifier="stray") as stray:
+                await stray.publish(STATE_V3, json.dumps({"online": False, "timestamp": t + 1}), qos=1, retain=True)
+            await wait_for(lambda: c.counters["messages_received"] >= before + 2)    # the OFFLINE and the new ONLINE
+            await asyncio.sleep(0.5)
+            watching.cancel()
+        assert c.counters["state_republished"] == 1 and c.counters["messages_received"] == before + 2   # copies not counted
+        assert published == [{"online": False, "timestamp": t + 1}, {"online": True, "timestamp": t}]
+    finally:
+        await offline(c, task)
+
+
+async def test_the_same_offline_again_is_answered_again_when_the_online_wasnt_published(mosquitto, monkeypatch):
+    c, _ = host(mosquitto)
+    task = await online(c)
+    try:
+        t = c.session_timestamp
+        await wait_for(lambda: c.counters["messages_received"] >= 1)
+        original = c._client.publish
+        fail = {"n": 1}
+
+        async def flaky(*args, **kwargs):            # the first re-publish of ONLINE fails
+            if fail["n"]:
+                fail["n"] -= 1
+                raise aiomqtt.MqttError("publish failed")
+            return await original(*args, **kwargs)
+        monkeypatch.setattr(c._client, "publish", flaky)
+        offline_state = json.dumps({"online": False, "timestamp": t + 1})
+        async with aiomqtt.Client("127.0.0.1", mosquitto, identifier="stray") as stray:
+            await stray.publish(STATE_V3, offline_state, qos=1, retain=True)
+            await wait_for(lambda: fail["n"] == 0)
+            await asyncio.sleep(0.3)
+            await stray.publish(STATE_V3, offline_state, qos=1, retain=True)      # the same bytes again
+        await wait_for(lambda: c.counters["state_republished"] == 1)
+        state = json.loads(await await_retained(mosquitto, STATE_V3, lambda v: json.loads(v)["online"]))
+        assert state == {"online": True, "timestamp": t}
+    finally:
+        await offline(c, task)
+
+
 async def test_the_previous_sessions_retained_offline_is_not_answered(mosquitto):
     c, _ = host(mosquitto)
     task = await online(c)

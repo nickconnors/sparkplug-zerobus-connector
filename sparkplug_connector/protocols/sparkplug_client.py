@@ -6,8 +6,8 @@ bridge, which writes it unchanged.
 
 With ``primary_host_id`` it is the edges' Sparkplug **primary host application** (``sparkplug/host.py``):
 each connection carries a will (OFFLINE STATE, retained, QoS 1) stamped with the connect time T,
-subscribes, then publishes ONLINE with the same T; a live OFFLINE for its own host id is answered with
-ONLINE again. The bridge's ``HostSupervisor`` opens ``online_allowed`` only while Databricks accepts the
+subscribes (its topics, then its own STATE topic), then publishes ONLINE with the same T; a live OFFLINE for its
+own host id is answered with ONLINE again. The bridge's ``HostSupervisor`` opens ``online_allowed`` only while Databricks accepts the
 rows; ``connect()`` waits for it, and ``go_offline()`` publishes OFFLINE and disconnects.
 Without ``primary_host_id`` it is a plain subscriber (not a primary host).
 
@@ -80,6 +80,7 @@ class SparkplugClient(ProtocolClient):
         self.offline_after_seconds = float(config.get("offline_after_seconds", 30))
         self.online_after_seconds = float(config.get("online_after_seconds", 30))
         self.online = False                           # ONLINE published on the current connection
+        self._last_own_state: bytes | None = None     # the last STATE seen on our topic (this connection)
         self.session_timestamp: int | None = None     # T: the will's and ONLINE's timestamp
         self.online_allowed = asyncio.Event()         # the HostSupervisor opens it; always open for a plain subscriber
         if not self.primary_host_id:
@@ -139,6 +140,7 @@ class SparkplugClient(ProtocolClient):
         self.session_timestamp = t
         self._closing = False
         self._ncmd_at = None
+        self._last_own_state = None
 
     async def subscribe(self) -> None:
         if self._client is None:
@@ -146,9 +148,9 @@ class SparkplugClient(ProtocolClient):
         for topic in self.topics:
             await self._client.subscribe(topic, qos=self.qos)
         if self.primary_host_id:
-            # own STATE before ONLINE; only if no filter covers it (spBv1.0/# covers v3), or every STATE comes twice
-            if not any(_matches(f, self.state_topic) for f in self.topics):
-                await self._client.subscribe(self.state_topic, qos=1)
+            # own STATE before ONLINE, even under spBv1.0/# (Sparkplug: the host subscribes to its own STATE topic;
+            # the TCK checks for the filter itself); a server may then send each STATE once per filter: _on_own_state
+            await self._client.subscribe(self.state_topic, qos=1)
             async with self._state_lock:
                 # taken OFFLINE while subscribing (go_offline published OFFLINE, or this connection is gone)
                 if not self.online_allowed.is_set() or self._client is None:
@@ -167,8 +169,8 @@ class SparkplugClient(ProtocolClient):
             async for message in self._client.messages:
                 topic, payload = message.topic.value, _payload_bytes(message.payload)
                 if self.primary_host_id and topic == self.state_topic:
-                    self.counters["messages_received"] += 1
-                    self._on_own_state(payload, bool(getattr(message, "retain", False)))
+                    if self._on_own_state(payload, bool(getattr(message, "retain", False))):
+                        self.counters["messages_received"] += 1       # a copy (once per filter) isn't counted
                     continue
                 self.handle_message(topic, payload, int(time.time() * 1000))
         except aiomqtt.MqttError:
@@ -178,14 +180,20 @@ class SparkplugClient(ProtocolClient):
             self.subscribed.clear()
             self.online = False
 
-    def _on_own_state(self, payload: bytes, retained: bool) -> None:
+    def _on_own_state(self, payload: bytes, retained: bool) -> bool:
         """A live OFFLINE for our host id while ONLINE: publish ONLINE again with T. The retained copy the
-        broker delivers on subscribe is the previous session's state, about to be replaced: ignored."""
+        broker delivers on subscribe is the previous session's state, about to be replaced: ignored. So is a copy
+        of the STATE just seen (a server may send one per matching filter: ``spBv1.0/#`` and the STATE topic), or
+        ONLINE would go out twice. False for a copy."""
+        copy, self._last_own_state = payload == self._last_own_state, payload
+        if copy:
+            return False
         if not self.online or retained or is_online_state(self.state_format, payload):
-            return
+            return True
         task = asyncio.get_running_loop().create_task(self._republish_online(self.session_timestamp))
         self._state_tasks.add(task)
         task.add_done_callback(self._state_tasks.discard)
+        return True
 
     async def _republish_online(self, t: int) -> None:
         async with self._state_lock:
@@ -199,6 +207,7 @@ class SparkplugClient(ProtocolClient):
                 logger.warning("[%s] own STATE was set offline while ONLINE; re-published ONLINE (timestamp %d)",
                                self.source_name, t)
             except Exception as e:  # noqa: BLE001 - the connection may be going away
+                self._last_own_state = None     # no ONLINE came back: the same OFFLINE again is answered again
                 logger.warning("[%s] re-publishing ONLINE failed: %s", self.source_name, e)
 
     async def go_offline(self) -> None:
@@ -380,17 +389,6 @@ def parse_endpoint(endpoint: str) -> tuple[str, int, bool]:
         except ValueError:
             return endpoint, default_port, use_tls
     return endpoint, default_port, use_tls
-
-
-def _matches(topic_filter: str, topic: str) -> bool:
-    """MQTT topic filter matching (``+`` one level, ``#`` the rest)."""
-    f, t = topic_filter.split("/"), topic.split("/")
-    for i, level in enumerate(f):
-        if level == "#":
-            return True
-        if i >= len(t) or level not in ("+", t[i]):
-            return False
-    return len(f) == len(t)
 
 
 def _flag(value: Any) -> bool:

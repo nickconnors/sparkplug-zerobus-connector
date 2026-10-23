@@ -140,8 +140,9 @@ one with the same id fights over STATE, and two connectors with different ids wr
 ## How it behaves
 
 - **ONLINE:** connect with a will (OFFLINE, QoS 1, retained) stamped with the connect time T, subscribe
-  (own STATE too), publish ONLINE with T. A live OFFLINE for its own id while ONLINE is answered with
-  ONLINE again (`state_republished`); the retained copy of the previous session's state is not.
+  (its own STATE topic too, a filter of its own even under `spBv1.0/#`), publish ONLINE with T. A live OFFLINE
+  for its own id while ONLINE is answered with ONLINE again (`state_republished`), once even when the MQTT
+  server sends the OFFLINE once per matching filter; the retained copy of the previous session's state is not.
 - **OFFLINE** (`host.py`): when Zerobus writes have failed, or a batch has waited for its
   acknowledgement, for `offline_after_seconds`, or the queue is above its high-water mark (80%), it
   publishes OFFLINE and disconnects (Sparkplug 3.0 doesn't allow ONLINE again on the same connection).
