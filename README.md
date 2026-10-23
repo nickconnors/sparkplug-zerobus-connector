@@ -12,6 +12,10 @@ row per Sparkplug message** to a Delta table through [Zerobus Ingest](https://do
 - **Confirmed writes**: a batch leaves the connector only once Zerobus has acknowledged it; an optional
   write-ahead log keeps unacknowledged rows across a crash or restart.
 - **A stored procedure call per NBIRTH** (optional), for example to (re)build per-model views.
+- **Strict Sparkplug sequencing** (by default): messages put back in `seq` order, an edge node's messages
+  dropped after a gap until its rebirth, rebirth requests (NCMD) to edge nodes it hasn't seen born, as Eclipse
+  Tahu's host library decides them (ported and tested against it); or a row for every message
+  (`sequence_handling: keep_all`).
 - **Web UI** to add, edit, start and stop sources and Zerobus, with an optional login; a health endpoint for
   Docker.
 
@@ -27,7 +31,7 @@ to run the connector:
 |---|---|---|
 | Edge setting | MQTT Transmission's Primary Host ID = the connector's `primary_host_id`, store and forward on | nothing to change |
 | Connector down, or Databricks unreachable | the edges buffer and send the backlog (flagged historical) once it is ONLINE again: nothing lost | messages published meanwhile are lost |
-| Start | the edges rebirth when it goes ONLINE | press **Rebirth** on the edges after starting it: the connector doesn't send rebirth requests, and the views need the births |
+| Start | the edges rebirth when it goes ONLINE | it asks each edge node it finds publishing for a rebirth (NCMD, ~5 s after its first message; the MQTT user needs publish rights on `spBv1.0/+/NCMD/+`), unless `block_auto_rebirth: true` (with `sequence_handling: keep_all`) |
 | Other hosts | while the connector is OFFLINE, MQTT Transmission **disconnects from the MQTT server for every subscriber**, not only for the connector | no effect on anything else |
 
 MQTT Transmission has **one** primary host per transmitter. If another application is already its primary
@@ -79,8 +83,9 @@ SPARKPLUG_MQTT_USERNAME=<mqtt user>
 SPARKPLUG_MQTT_PASSWORD=<its password>
 ```
 
-The MQTT user needs to subscribe to `spBv1.0/#` and, as a primary host, to publish its own STATE topic
-(`spBv1.0/STATE/<primary_host_id>`). For **MQTT over TLS** use `mqtts://<host>:8883`; a private CA, client
+The MQTT user needs to subscribe to `spBv1.0/#`, to publish rebirth requests on `spBv1.0/+/NCMD/+` (unless
+`block_auto_rebirth: true`; some MQTT servers, Chariot among them, close the connection on a refused publish)
+and, as a primary host, to publish its own STATE topic (`spBv1.0/STATE/<primary_host_id>`). For **MQTT over TLS** use `mqtts://<host>:8883`; a private CA, client
 certificates and the other TLS settings go under the source's `security:` (commented in the example).
 
 ### 3. Run it in Docker

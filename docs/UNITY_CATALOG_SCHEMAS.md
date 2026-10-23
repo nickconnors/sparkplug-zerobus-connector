@@ -41,7 +41,7 @@ The connector writes JSON records with confirmed writes (a batch is kept until Z
 | `edge_node_id` | STRING | string | From the topic |
 | `device_id` | STRING | string or null | From the topic; NULL for node messages |
 | `msg` | VARIANT | JSON text | The payload as Tahu JSON: `timestamp`, `seq` and `metrics` (each with `name`, `timestamp`, `dataType`, `value`); GZIP/DEFLATE-compressed payloads are decompressed first |
-| `inserted_at` | DECIMAL(38,0) | string of digits | Receipt time in **milliseconds** since epoch |
+| `inserted_at` | DECIMAL(38,0) | string of digits | Receipt time in **milliseconds** since epoch (a message held for a missing `seq`: when it is put back in order) |
 
 Host STATE messages, commands (NCMD, DCMD), other namespaces, malformed topics and payloads that can't be
 decoded get no row (they're counted in `GET /api/sparkplug/health`).
