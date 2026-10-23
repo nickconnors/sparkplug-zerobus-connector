@@ -14,6 +14,7 @@ import yaml
 from test_confirmed_writer import FakeStreams
 from sparkplug_connector.core import bridge as core_bridge
 from sparkplug_connector.core.config_loader import ConfigLoader
+from sparkplug_connector.protocols.sparkplug_client import SparkplugClient
 from sparkplug_connector.web.web_server import WebServer
 
 PACKAGE_CONFIG = pathlib.Path(core_bridge.__file__).resolve().parents[1] / "config" / "config.yaml"
@@ -70,6 +71,9 @@ class IdleClient:
         self.is_connected = False
 
     async def go_offline(self):
+        pass
+
+    async def close(self):
         pass
 
     async def connect(self):
@@ -294,11 +298,28 @@ async def test_saving_the_zerobus_settings_goes_to_the_started_file_with_its_pla
 async def test_the_page_refuses_a_state_format_or_seconds_the_source_cant_use(page, started):
     http, path, bridge = page
     before, sp = path.read_text(), dict(running(bridge, "sp"))
-    for field, value in [("state_format", "v4"), ("offline_after_seconds", "soon"), ("online_after_seconds", -1)]:
+    for field, value in [("state_format", "v4"), ("offline_after_seconds", "soon"), ("online_after_seconds", -1),
+                         ("sequence_handling", "drop"), ("sequence_reordering_timeout", 0),
+                         ("sequence_reordering_timeout", "soon"), ("block_auto_rebirth", "maybe"),
+                         ("block_auto_rebirth", True)]:                # needs keep_all
         async with http.put("/api/sources/sp", json={"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883",
                                                      "enabled": True, field: value}) as r:
             assert r.status == 400, (field, await r.text())
     assert path.read_text() == before and running(bridge, "sp") == sp
+
+
+async def test_the_page_saves_the_sequence_settings_and_the_source_uses_them(page, started):
+    http, path, bridge = page
+    async with http.put("/api/sources/sp", json={"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883",
+                                                 "enabled": True, "sequence_handling": "keep_all",
+                                                 "sequence_reordering_timeout": "2000", "block_auto_rebirth": True}) as r:
+        assert r.status == 200, await r.text()
+    saved = next(x for x in yaml.safe_load(path.read_text())["sources"] if x["name"] == "sp")
+    assert (saved["sequence_handling"], saved["sequence_reordering_timeout"], saved["block_auto_rebirth"]) == ("keep_all", 2000, True)
+    used = bridge.clients["sp"].config                              # what the restarted source was given
+    assert (used["sequence_handling"], used["sequence_reordering_timeout"], used["block_auto_rebirth"]) == ("keep_all", 2000, True)
+    seq = SparkplugClient("sp", "mqtt://localhost:1883", used, on_record=lambda r: None).sequencer
+    assert (seq.mode, seq.timeout_s, seq.block_auto_rebirth) == ("keep_all", 2.0, True)
 
 
 async def test_a_source_that_fails_to_start_with_its_new_settings_runs_on_with_the_old(page, started, monkeypatch):

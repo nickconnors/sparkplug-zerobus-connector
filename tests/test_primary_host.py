@@ -89,6 +89,7 @@ async def online(c: SparkplugClient) -> asyncio.Task:
 async def offline(c: SparkplugClient, task: asyncio.Task) -> None:
     await c.go_offline()
     await asyncio.gather(task, return_exceptions=True)
+    await c.close()
 
 
 async def test_online_state_is_retained_and_carries_the_will_timestamp(mosquitto):
@@ -164,7 +165,7 @@ async def test_legacy_state_format(mosquitto):
 
 
 async def test_sparkplug_messages_become_rows(mosquitto):
-    c, rows = host(mosquitto)
+    c, rows = host(mosquitto, sequence_handling="keep_all")     # a DBIRTH alone: no row in strict
     task = await online(c)
     try:
         topic, payload, java = next(m for m in transmission_messages() if "/DBIRTH/" in m[0])
@@ -191,7 +192,8 @@ async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_
     monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
     bridge = core_bridge.Bridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": f"mqtt://127.0.0.1:{mosquitto}",
-                     "client_id": "d1-test", "primary_host_id": HOST_ID, "offline_after_seconds": 2, "online_after_seconds": 2}],
+                     "client_id": "d1-test", "primary_host_id": HOST_ID, "offline_after_seconds": 2, "online_after_seconds": 2,
+                     "sequence_handling": "keep_all"}],                 # rows for messages without a birth
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c", "schema": "s",

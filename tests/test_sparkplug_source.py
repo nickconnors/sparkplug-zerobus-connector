@@ -21,6 +21,8 @@ from sparkplug_connector.protocols.sparkplug_client import SparkplugClient, pars
 from sparkplug_connector.sparkplug.raw_row import COLUMNS, RawRow, convert
 
 TRANSMISSION = FIXTURES / "transmission"
+# a row for every message (the raw-row path); strict (the default): test_sequenced_source.py
+KEEP_ALL = {"sequence_handling": "keep_all"}
 SKIPPED = [   # (topic, payload, counter): messages that get no row
     ("spBv1.0/STATE/databricks-zerobus", b'{"online":true,"timestamp":1}', "skipped_state"),
     ("STATE/databricks-zerobus", b"ONLINE", "skipped_state"),
@@ -130,7 +132,7 @@ def test_factory_refuses_other_protocols():
 
 def test_handle_message_hands_on_rows_and_counts_skips():
     rows: list[RawRow] = []
-    c = SparkplugClient("chariot", "mqtt://chariot:1883", {}, on_record=rows.append)
+    c = SparkplugClient("chariot", "mqtt://chariot:1883", KEEP_ALL, on_record=rows.append)
     messages = transmission_messages()
     for topic, payload, _ in messages:
         assert c.handle_message(topic, payload, 1).row is not None
@@ -159,7 +161,7 @@ def test_a_row_the_bridge_cant_take_is_counted_and_the_next_messages_go_on():
             taken.append(None)
             raise RuntimeError("queue unavailable")
         taken.append(row)
-    c = SparkplugClient("chariot", "mqtt://chariot:1883", {}, on_record=on_record)
+    c = SparkplugClient("chariot", "mqtt://chariot:1883", KEEP_ALL, on_record=on_record)
     topic, payload, _ = transmission_messages()[0]
     c.handle_message(topic, payload, 1)
     c.handle_message(topic, payload, 2)
@@ -191,6 +193,7 @@ async def test_a_host_taken_offline_while_subscribing_publishes_no_online_after_
     await asyncio.sleep(0.01)                               # OFFLINE published, disconnecting
     release.set()
     await asyncio.gather(subscribing, offline, return_exceptions=True)
+    await c.close()
     assert published == [False]
 
 # ----------------------------------------------------------------------------- through a broker
@@ -198,7 +201,7 @@ async def test_a_host_taken_offline_while_subscribing_publishes_no_online_after_
 async def test_rows_from_a_broker_equal_java_tahu(broker):
     endpoint, port = broker
     rows: list[RawRow] = []
-    client = SparkplugClient("chariot", endpoint, {"client_id": "sparkplug-test"}, on_record=rows.append)
+    client = SparkplugClient("chariot", endpoint, {"client_id": "sparkplug-test", **KEEP_ALL}, on_record=rows.append)
     await client.connect()
     task = asyncio.create_task(client.subscribe())
     try:
@@ -211,6 +214,7 @@ async def test_rows_from_a_broker_equal_java_tahu(broker):
         await client.stop()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+        await client.close()
     assert sorted((r.msg_topic, r.msg) for r in rows) == sorted((t, j) for t, _, j in messages)
     assert {(r.group_id, r.edge_node_id) for r in rows} == {("Plant1", "Line A")}
     assert client.counters["skipped_state"] == 1 and client.counters["skipped_command"] == 2
@@ -221,7 +225,7 @@ async def test_rows_from_a_broker_equal_java_tahu(broker):
 async def test_bridge_queues_sparkplug_rows_with_the_sparkplug_raw_columns(broker):
     endpoint, _port = broker
     bridge = Bridge({
-        "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "bridge-test"}],
+        "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "bridge-test", **KEEP_ALL}],
         "zerobus": {"enabled": False},
         "backpressure": {},
     })
@@ -258,7 +262,7 @@ async def test_source_reconnects_and_receives_again_after_the_connection_drops(b
     restart: its shutdown leaves the old sessions answering.)"""
     endpoint, port = broker
     bridge = Bridge({
-        "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "drop-test"}],
+        "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "drop-test", **KEEP_ALL}],
         "zerobus": {"enabled": False},
         "backpressure": {},
     })
@@ -283,7 +287,7 @@ async def test_stop_leaves_the_client_able_to_subscribe_again(broker):
     """The bridge calls stop() before reconnecting; a stop flag left set ended the next subscription."""
     endpoint, port = broker
     rows = []
-    client = SparkplugClient("chariot", endpoint, {"client_id": "stop-test"}, on_record=rows.append)
+    client = SparkplugClient("chariot", endpoint, {"client_id": "stop-test", **KEEP_ALL}, on_record=rows.append)
     topic, payload, _ = transmission_messages()[0]
     for attempt in (1, 2):
         await client.connect()
@@ -293,6 +297,7 @@ async def test_stop_leaves_the_client_able_to_subscribe_again(broker):
         await wait_for(lambda: len(rows) == attempt)
         await client.stop()
         await asyncio.gather(task, return_exceptions=True)
+    await client.close()
 
 
 async def test_a_disconnect_that_hangs_is_given_up_so_the_source_can_connect_again(broker, monkeypatch):
@@ -301,7 +306,7 @@ async def test_a_disconnect_that_hangs_is_given_up_so_the_source_can_connect_aga
     monkeypatch.setattr(sparkplug_client, "DISCONNECT_TIMEOUT_S", 0.05)
     endpoint, port = broker
     rows = []
-    client = SparkplugClient("chariot", endpoint, {"client_id": "hang-test"}, on_record=rows.append)
+    client = SparkplugClient("chariot", endpoint, {"client_id": "hang-test", **KEEP_ALL}, on_record=rows.append)
     await client.connect()
     stuck = client._client
 
@@ -320,5 +325,6 @@ async def test_a_disconnect_that_hangs_is_given_up_so_the_source_can_connect_aga
         await wait_for(lambda: len(rows) == 1)
         await client.stop()
         await asyncio.gather(task, return_exceptions=True)
+        await client.close()
     finally:
         await type(stuck).__aexit__(stuck, None, None, None)
