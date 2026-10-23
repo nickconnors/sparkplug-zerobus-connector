@@ -209,6 +209,38 @@ JPype: `TAHU_JVM=<path to libjvm>`, `TAHU_JAVA_CLASSPATH`) or **Docker** with th
 image (the primary host against a real MQTT server); they are skipped when those aren't available.
 `tests/test_live_zerobus.py` writes to a real table and is skipped unless its environment is set (see the
 file). The payload fixtures are synthetic, shaped like MQTT Transmission's (`tests/make_fixtures.py`).
+`tests/tck/` runs the Sparkplug TCK (below; Docker and the `hivemq/hivemq-ce:2022.1` image, skipped otherwise;
+`-m "not tck"` leaves it out).
+
+## Sparkplug TCK
+
+The connector as **primary host** passes the
+[Eclipse Sparkplug TCK](https://github.com/eclipse-sparkplug/sparkplug/tree/master/tck) 3.0.0's Host Application
+tests, except where it deliberately does less than a full Sparkplug host application (below). This is not a
+certification: no listing was requested. The TCK is a HiveMQ broker extension that watches the host's MQTT traffic,
+plays edge nodes and devices, and asks the operator questions; `tests/tck/` runs its six Host Application tests
+against the connector over the TCK's MQTT control topics, with HiveMQ CE 2022.1 (the version its user guide names),
+the packaged TCK (EPL-2.0, downloaded from download.eclipse.org into `~/.cache/sparkplug-tck` on the first run,
+SHA-256 checked, not in this repository) and Mosquitto as the second MQTT server. The connector runs in-process
+with Zerobus faked (the TCK looks at MQTT only). Each run writes its results to `tests/tck/results/`; the expected
+result of every assertion is in `tests/tck/expected/`.
+
+```
+docker pull hivemq/hivemq-ce:2022.1 && docker pull eclipse-mosquitto:2
+.venv/bin/python -m pytest tests/tck -v
+```
+
+| Test | Assertions passed | Not passed |
+|---|---|---|
+| Session establishment | 43 | 1 not executed: the MQTT 5 clean start (the connector uses MQTT 3.1.1) |
+| Session termination | 14 | 1 not executed: OFFLINE published, then the connection dropped without a DISCONNECT (the connector always disconnects cleanly) |
+| Message ordering | 22 | |
+| Multiple brokers (a source per MQTT server, one `primary_host_id`) | 8 | |
+| Send command | 28 | 11 not executed: the test asks in turn for a node rebirth (sent: **Edge nodes**' Request rebirth), a node metric write, a device rebirth and a device metric write. The connector writes nothing to the edge, so the test ends at the node write and the device commands are never asked for |
+| Edge session termination | 12 | 3 failed: the metrics marked STALE at a DDEATH or NDEATH. The connector keeps no metric values: staleness is for the tables downstream. The edge node and device offline questions pass, answered from **Edge nodes** |
+
+The **plain subscriber** mode is outside the TCK: every Sparkplug 3.0 host application publishes STATE, so a
+connector without `primary_host_id` is a Sparkplug subscriber, not a Sparkplug 3.0 Host Application.
 
 ## Provenance
 
