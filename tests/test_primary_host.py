@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 import socket
 import subprocess
@@ -277,7 +278,7 @@ async def test_as_primary_host_too_an_edge_node_in_mid_session_is_asked_for_a_re
 
 # ----------------------------------------------------------------------------- the bridge: OFFLINE while writes fail
 
-async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_they_recover(mosquitto, monkeypatch):
+async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_they_recover(mosquitto, monkeypatch, caplog):
     streams = FakeStreams()
 
     class FakeRowStreams:
@@ -313,6 +314,7 @@ async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_
         assert off["timestamp"] >= t1 and bridge.host_supervisors["chariot"].state.mode == "OFFLINE"
         streams.fail_waits = 0                                       # Databricks is back: the batch goes through
         await wait_for(lambda: client.is_online, 30)                 # ONLINE after online_after_seconds, new will
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR and "[chariot] Error" in r.getMessage()]
         on = json.loads(await await_retained(mosquitto, STATE_V3, lambda v: json.loads(v)["online"]))
         assert on["timestamp"] == client.session_timestamp > t1
         health = bridge.sparkplug_health()["chariot"]
@@ -388,3 +390,60 @@ async def test_after_an_operators_rebirth_request_no_automatic_one_follows_withi
         assert ncmds == ["spBv1.0/Plant1/NCMD/Line A"]
     finally:
         await offline(c, task)
+
+
+# ----------------------------------------------------------------------------- the bridge's log at a stop
+
+def _bridge_with(mosquitto, monkeypatch, **source):
+    streams = FakeStreams()
+
+    class FakeRowStreams:
+        def __init__(self, *args):
+            pass
+
+        async def open(self):
+            return await streams.open()
+
+    monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
+    return core_bridge.Bridge({
+        "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": f"mqtt://127.0.0.1:{mosquitto}",
+                     "client_id": f"log-{time.monotonic_ns()}", **source}],
+        "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
+                    "auth": {"client_id": "id", "client_secret": "secret"},
+                    "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c", "schema": "s",
+                                       "table": "sparkplug_raw"}},
+        "backpressure": {},
+    })
+
+
+def _bridge_warnings(caplog):
+    return [r.getMessage() for r in caplog.records if r.name == core_bridge.__name__ and r.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize("primary", [True, False])
+async def test_stopping_the_bridge_or_a_source_logs_no_error(mosquitto, monkeypatch, caplog, primary):
+    caplog.set_level(logging.INFO)
+    bridge = _bridge_with(mosquitto, monkeypatch, **({"primary_host_id": HOST_ID} if primary else {}))
+    await bridge.start()
+    try:
+        await wait_for(lambda: "chariot" in bridge.clients and bridge.clients["chariot"].subscribed.is_set(), 10)
+        assert (await bridge.stop_source("chariot"))["status"] == "ok"
+        await bridge.start_source("chariot")
+        await wait_for(lambda: "chariot" in bridge.clients and bridge.clients["chariot"].subscribed.is_set(), 10)
+    finally:
+        await bridge.stop()
+    assert _bridge_warnings(caplog) == []
+    assert any("subscription ended: the source is stopping" in r.getMessage() for r in caplog.records)
+
+
+async def test_a_connection_lost_is_still_an_error(mosquitto, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    bridge = _bridge_with(mosquitto, monkeypatch)
+    await bridge.start()
+    try:
+        await wait_for(lambda: "chariot" in bridge.clients and bridge.clients["chariot"].subscribed.is_set(), 10)
+        bridge.clients["chariot"]._client._client.socket().shutdown(socket.SHUT_RDWR)
+        await wait_for(lambda: any(r.levelno == logging.ERROR and "[chariot] Error" in r.getMessage()
+                                   for r in caplog.records), 10)
+    finally:
+        await bridge.stop()
