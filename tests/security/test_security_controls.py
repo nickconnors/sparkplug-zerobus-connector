@@ -15,101 +15,51 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 class TestAuthentication:
-    """Test authentication controls."""
+    """Test authentication controls: a Databricks workspace's OAuth, or client certificates."""
 
-    def test_oauth2_required(self):
-        """Test that OAuth2 authentication is enforced."""
-        try:
-            from sparkplug_connector.web.auth import AuthenticationManager, OAuth
-        except ImportError as e:
-            if 'authlib' in str(e):
-                pytest.skip("authlib.integrations.aiohttp_client not available")
-            raise
+    BASE = {'enabled': True, 'method': 'oauth2', 'session': {'secret_key': 'test-secret-key-for-testing-only'},
+            'oauth': {'client_id': 'test-client-id', 'client_secret': 'test-secret',
+                      'workspace_host': 'https://example.cloud.databricks.com'}}
 
-        if OAuth is None:
-            pytest.skip("authlib.integrations.aiohttp_client not available")
+    def test_oauth2_with_a_databricks_workspace_by_default(self):
+        from sparkplug_connector.web.auth import AuthenticationManager
 
-        config = {
-            'enabled': True,
-            'method': 'oauth2',
-            'oauth': {
-                'provider': 'azure',
-                'client_id': 'test-client-id',
-                'client_secret': 'test-secret',
-                'redirect_uri': 'http://localhost:8082/callback',
-                'tenant_id': 'test-tenant'
-            },
-            'require_mfa': False,
-            'session': {
-                'secret_key': 'test-secret-key-for-testing-only'
-            }
-        }
+        auth_manager = AuthenticationManager(self.BASE)
+        assert (auth_manager.enabled, auth_manager.method, auth_manager.provider) == (True, 'oauth2', 'databricks')
 
-        auth_manager = AuthenticationManager(config)
+    @pytest.mark.parametrize("provider", ["azure", "okta", "google", "other"])
+    def test_other_oauth_providers_are_refused(self, provider):
+        from sparkplug_connector.web.auth import AuthenticationManager
 
-        assert auth_manager.enabled is True
-        assert auth_manager.method == 'oauth2'
-        assert auth_manager.provider == 'azure'
+        with pytest.raises(ValueError, match="only 'databricks'"):
+            AuthenticationManager({**self.BASE, 'oauth': {**self.BASE['oauth'], 'provider': provider}})
 
-    def test_mfa_enforcement(self):
-        """Test that MFA is enforced."""
-        try:
-            from sparkplug_connector.web.auth import AuthenticationManager, OAuth
-        except ImportError as e:
-            if 'authlib' in str(e):
-                pytest.skip("authlib.integrations.aiohttp_client not available")
-            raise
+    def test_require_mfa_is_refused(self):
+        """The connector can't see how a Databricks login was authenticated: MFA is the identity provider's."""
+        from sparkplug_connector.web.auth import AuthenticationManager
 
-        if OAuth is None:
-            pytest.skip("authlib.integrations.aiohttp_client not available")
-
-        config = {
-            'enabled': True,
-            'method': 'oauth2',
-            'oauth': {'provider': 'azure', 'client_id': 'test', 'client_secret': 'test'},
-            'require_mfa': True,
-            'mfa': {
-                'claim_name': 'amr',
-                'required_methods': ['mfa', 'otp']
-            },
-            'session': {'secret_key': 'test'}
-        }
-
-        auth_manager = AuthenticationManager(config)
-
-        # Test MFA check with token containing MFA claim
-        token_with_mfa = {'amr': ['mfa']}
-        assert auth_manager.check_mfa_status(token_with_mfa) is True
-
-        # Test MFA check without MFA claim
-        token_without_mfa = {'amr': ['pwd']}
-        assert auth_manager.check_mfa_status(token_without_mfa) is False
+        with pytest.raises(ValueError, match="require_mfa"):
+            AuthenticationManager({**self.BASE, 'require_mfa': True})
+        assert AuthenticationManager({**self.BASE, 'require_mfa': False}).enabled
 
     def test_session_timeout(self):
         """Test that sessions timeout correctly."""
-        try:
-            from sparkplug_connector.web.auth import AuthenticationManager, OAuth
-        except ImportError as e:
-            if 'authlib' in str(e):
-                pytest.skip("authlib.integrations.aiohttp_client not available")
-            raise
+        from sparkplug_connector.web.auth import AuthenticationManager
 
-        if OAuth is None:
-            pytest.skip("authlib.integrations.aiohttp_client not available")
-
-        config = {
-            'enabled': True,
-            'method': 'oauth2',
-            'oauth': {'provider': 'azure', 'client_id': 'test', 'client_secret': 'test'},
-            'session': {
-                'max_age_seconds': 28800,  # 8 hours
-                'secret_key': 'test'
-            }
-        }
-
-        auth_manager = AuthenticationManager(config)
-
+        auth_manager = AuthenticationManager({**self.BASE, 'session': {'max_age_seconds': 28800, 'secret_key': 'test'}})
         assert auth_manager.session_max_age == 28800
+
+    async def test_client_certificates_need_no_oauth_settings(self):
+        from aiohttp import web
+        from sparkplug_connector.web.auth import AuthenticationManager
+
+        auth_manager = AuthenticationManager({'enabled': True, 'method': 'client_cert', 'session': {'secret_key': 'k'},
+                                              'oauth': {'provider': 'databricks'}})      # no workspace_host
+        app = web.Application()
+        await auth_manager.setup(app)
+        assert app['auth_manager'] is auth_manager and auth_manager.oauth_client is None
+        assert (await auth_manager.handle_login(Mock())).status == 404
+        assert (await auth_manager.handle_oauth_callback(Mock())).status == 404
 
 
 class TestAuthorization:

@@ -164,8 +164,9 @@ With `method: oauth2` and `provider: databricks` the login is a Databricks works
 
 Open the UI on the redirect URL's host name (a login started on another name is moved there first). Logout
 ends the connector's session; signing in again is immediate while the browser is still signed in to
-Databricks. The `azure`, `okta` and `google` providers need authlib's aiohttp client, which current authlib
-releases don't include. `method: client_cert` takes the role from a client certificate (needs `web_ui.tls`
+Databricks. Databricks is the only OAuth provider (another one is refused at start); MFA is required in the
+workspace's identity provider, not by the connector (`require_mfa` is refused: the connector can't see how a login
+was authenticated). `method: client_cert` takes the role from a client certificate (needs `web_ui.tls`
 with `require_client_cert: true`).
 
 ### HTTPS (off by default)
