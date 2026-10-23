@@ -34,3 +34,6 @@ session_keys.txt
 oauth_state/
 .oauth_cache/
 .coverage
+
+# Sparkplug TCK runs (tests/tck/)
+tests/tck/results/

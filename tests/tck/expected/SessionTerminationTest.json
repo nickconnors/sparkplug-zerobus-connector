@@ -1,0 +1,17 @@
+{
+  "Monitor:host-topic-phid-birth-payload": "PASS",
+  "Monitor:host-topic-phid-death-payload-timestamp-connect": "PASS",
+  "Monitor:operational-behavior-host-application-connect-will-payload": "PASS",
+  "Monitor:operational-behavior-host-application-host-id": "PASS",
+  "Monitor:payloads-state-will-message-payload": "PASS",
+  "Monitor:topic-structure": "PASS",
+  "host-topic-phid-death-payload-timestamp-disconnect-clean": "PASS",
+  "host-topic-phid-death-payload-timestamp-disconnect-with-no-disconnect-packet": "NOT EXECUTED",
+  "operational-behavior-host-application-connect-birth": "PASS",
+  "operational-behavior-host-application-death-payload": "PASS",
+  "operational-behavior-host-application-death-qos": "PASS",
+  "operational-behavior-host-application-death-retained": "PASS",
+  "operational-behavior-host-application-death-topic": "PASS",
+  "operational-behavior-host-application-disconnect-intentional": "PASS",
+  "operational-behavior-host-application-termination": "PASS"
+}

@@ -1,0 +1,10 @@
+{
+  "Monitor:host-topic-phid-birth-payload": "PASS",
+  "Monitor:host-topic-phid-death-payload-timestamp-connect": "PASS",
+  "Monitor:operational-behavior-host-application-connect-will-payload": "PASS",
+  "Monitor:payloads-state-will-message-payload": "PASS",
+  "Monitor:topic-structure": "PASS",
+  "operational-behavior-host-application-multi-server-timestamp": "PASS",
+  "operational-behavior-primary-application-state-with-multiple-servers-state": "PASS",
+  "operational-behavior-primary-application-state-with-multiple-servers-state-subs": "PASS"
+}

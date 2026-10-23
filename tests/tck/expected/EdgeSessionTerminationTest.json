@@ -1,0 +1,17 @@
+{
+  "Monitor:case-sensitivity-sparkplug-ids": "PASS",
+  "Monitor:payloads-timestamp-in-UTC": "PASS",
+  "Monitor:topic-structure": "PASS",
+  "Monitor:topic-structure-namespace-device-id-associated-message-types": "PASS",
+  "Monitor:topic-structure-namespace-device-id-non-associated-message-types": "PASS",
+  "Monitor:topic-structure-namespace-duplicate-device-id-across-edge-node": "PASS",
+  "Monitor:topic-structure-namespace-valid-device-id": "PASS",
+  "Monitor:topic-structure-namespace-valid-edge-node-id": "PASS",
+  "Monitor:topic-structure-namespace-valid-group-id": "PASS",
+  "operational-behavior-edge-node-termination-host-action-ddeath-devices-offline": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ddeath-devices-tags-stale": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ndeath-devices-offline": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ndeath-devices-tags-stale": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ndeath-node-offline": "FAIL",
+  "operational-behavior-edge-node-termination-host-action-ndeath-node-tags-stale": "FAIL"
+}
