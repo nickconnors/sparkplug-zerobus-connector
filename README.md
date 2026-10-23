@@ -91,12 +91,25 @@ certificates and the other TLS settings go under the source's `security:` (comme
 
 ### 3. Run it in Docker
 
+Linux / macOS (bash):
+
 ```
 docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
 docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 --env-file connector.env \
   -p 127.0.0.1:8001:8001 \
   --mount type=bind,source="$PWD/sparkplug_connector/config/config.yaml",target=/app/sparkplug_connector/config/config.yaml \
   --mount type=volume,source=connector-wal,target=/app/wal \
+  sparkplug-zerobus
+```
+
+Windows (PowerShell; a backtick ends each continued line, nothing after it):
+
+```powershell
+docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
+docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 --env-file connector.env `
+  -p 127.0.0.1:8001:8001 `
+  --mount "type=bind,source=$PWD\sparkplug_connector\config\config.yaml,target=/app/sparkplug_connector/config/config.yaml" `
+  --mount "type=volume,source=connector-wal,target=/app/wal" `
   sparkplug-zerobus
 ```
 
@@ -115,7 +128,8 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
   without it they are lost. In Compose: `stop_grace_period: 30s`.
 - Logs go to the console only (`docker logs`; the image sets `CONNECTOR_LOG_FILES=false`): set a size limit
   in Docker's logging options (e.g. `--log-opt max-size=50m --log-opt max-file=5`). Outside Docker the
-  connector also writes rotated log files to `/tmp/sparkplug_connector_logs`.
+  connector also writes rotated log files to `/tmp/sparkplug_connector_logs` (on Windows
+  `\tmp\sparkplug_connector_logs` on the current drive).
 - The image is Python only: build the web UI first (below) to include it; without it `/` explains how.
 - The web UI is on port 8001 (`web_ui.port`). Publish it on 127.0.0.1, or switch the login on (below)
   before publishing it more widely.
@@ -128,10 +142,20 @@ server is down. It doesn't say whether rows reach Databricks: `GET /api/sparkplu
 
 ### Or run it from a checkout
 
+Linux / macOS:
+
 ```
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m sparkplug_connector
+```
+
+Windows (PowerShell):
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python -m sparkplug_connector
 ```
 
 ## Web UI
@@ -149,6 +173,8 @@ The UI is a React app in `webui/apps/connector-ui`, built into `sparkplug_connec
 ```
 cd webui && npm ci && npm run build
 ```
+
+(PowerShell: `cd webui; npm ci; npm run build`.)
 
 ### Login (off by default)
 
@@ -208,6 +234,9 @@ with `require_client_cert: true`).
 .venv/bin/python -m pytest tests
 ```
 
+(PowerShell: `.venv\Scripts\pip install -r requirements.txt -r tests/requirements.txt`, then
+`.venv\Scripts\python -m pytest tests`.)
+
 Some tests need **Java 17** (Eclipse Tahu's Java implementation is the reference for the JSON, through
 JPype: `TAHU_JVM=<path to libjvm>`, `TAHU_JAVA_CLASSPATH`) or **Docker** with the `eclipse-mosquitto:2`
 image (the primary host against a real MQTT server); they are skipped when those aren't available.
@@ -230,9 +259,12 @@ with Zerobus faked (the TCK looks at MQTT only). Each run writes its results to 
 result of every assertion is in `tests/tck/expected/`.
 
 ```
-docker pull hivemq/hivemq-ce:2022.1 && docker pull eclipse-mosquitto:2
+docker pull hivemq/hivemq-ce:2022.1
+docker pull eclipse-mosquitto:2
 .venv/bin/python -m pytest tests/tck -v
 ```
+
+(PowerShell: the same `docker pull` lines, then `.venv\Scripts\python -m pytest tests/tck -v`.)
 
 | Test | Assertions passed | Not passed |
 |---|---|---|
