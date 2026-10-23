@@ -13,6 +13,9 @@ const EMPTY_SPARKPLUG = {
   state_format: "v3",
   offline_after_seconds: "",
   online_after_seconds: "",
+  sequence_handling: "strict",
+  sequence_reordering_timeout: "",
+  block_auto_rebirth: false,
   nbirth_enabled: false,
   warehouse_id: "",
   procedures: "",
@@ -148,6 +151,9 @@ export function SourcesPage() {
       state_format: text(s.state_format) || "v3",
       offline_after_seconds: text(s.offline_after_seconds),
       online_after_seconds: text(s.online_after_seconds),
+      sequence_handling: text(s.sequence_handling) || "strict",
+      sequence_reordering_timeout: text(s.sequence_reordering_timeout),
+      block_auto_rebirth: switchedOn(s.block_auto_rebirth ?? false),
       nbirth_enabled: s.edge_node_schemas ? switchedOn(nbirth.enabled ?? true) : false,
       warehouse_id: text(nbirth.warehouse_id),
       procedures: listed(nbirth.procedures).join(", "),
@@ -181,6 +187,9 @@ export function SourcesPage() {
       state_format: sparkplug.state_format,
       offline_after_seconds: seconds(sparkplug.offline_after_seconds),
       online_after_seconds: seconds(sparkplug.online_after_seconds),
+      sequence_handling: sparkplug.sequence_handling,
+      sequence_reordering_timeout: seconds(sparkplug.sequence_reordering_timeout),
+      block_auto_rebirth: sparkplug.block_auto_rebirth,
     };
     for (const [key, v] of Object.entries(fields)) if (v !== "" || mode === "edit") payload[key] = v;
     if (sparkplug.nbirth_enabled || (mode === "edit" && sparkplug.had_nbirth)) {
@@ -384,9 +393,46 @@ export function SourcesPage() {
               catalog.schema.procedure, called as procedure(prefix, group_id, edge_node_id, false) like
               create_edge_node_schema.
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label="Rows">
+                <Select
+                  value={sparkplug.sequence_handling}
+                  onChange={(e) => setSparkplug((p) => ({ ...p, sequence_handling: e.target.value }))}
+                >
+                  <option value="strict">strict (seq order, drops until a rebirth)</option>
+                  <option value="keep_all">keep_all (every message)</option>
+                </Select>
+              </Field>
+              <Field label="Reordering timeout (ms)">
+                <TextInput
+                  type="number"
+                  min={1}
+                  value={sparkplug.sequence_reordering_timeout}
+                  onChange={(e) => setSparkplug((p) => ({ ...p, sequence_reordering_timeout: e.target.value }))}
+                  placeholder="5000"
+                />
+              </Field>
+            </div>
+            <label className="field">
+              <div className="field-label">Block auto rebirth</div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={sparkplug.block_auto_rebirth}
+                  onChange={(e) => setSparkplug((p) => ({ ...p, block_auto_rebirth: e.target.checked }))}
+                  style={{ width: 18, height: 18 }}
+                />
+                <span className="muted">Never ask an edge node to rebirth</span>
+              </div>
+            </label>
+            <div className="muted">
+              strict: messages put back in seq order; after a gap, the edge node&apos;s messages dropped until its
+              rebirth. Rebirth requests (NCMD) need the MQTT user to publish on spBv1.0/+/NCMD/+; blocking them needs
+              Rows: keep_all.
+            </div>
             <div className="muted">
               Primary host ID: the edges&apos; Primary Host ID (the edges buffer while the connector is OFFLINE);
-              empty: a plain subscriber (press Rebirth on the edges after starting it).
+              empty: a plain subscriber (it asks the edges for a rebirth unless that is blocked).
             </div>
             <div className="muted">Username, password, topics and TLS: in the configuration file only.</div>
 
@@ -462,6 +508,8 @@ export function SourcesPage() {
                     const enabled = (s as any)?.enabled;
                     const active = activeMap.has(name);
                     const sparkplugState = sparkplugHealth[name]?.state;
+                    const dropped = Number(sparkplugHealth[name]?.messages_dropped ?? 0);
+                    const keepAll = sparkplugHealth[name]?.sequence_handling === "keep_all";
                     return (
                       <tr key={name} style={{ borderTop: "1px solid rgba(255,255,255,0.03)" }}>
                         <td style={{ padding: 8 }}>
@@ -483,6 +531,12 @@ export function SourcesPage() {
                         <td style={{ padding: 8 }}>
                           {active ? <strong>yes</strong> : <span className="muted">no</span>}
                           {active && sparkplugState ? <span className="muted"> · {sparkplugState}</span> : null}
+                          {active && dropped > 0 ? (
+                            <span className="muted">
+                              {" "}
+                              · {dropped} {keepAll ? "strict would drop" : "dropped"}
+                            </span>
+                          ) : null}
                         </td>
                         <td style={{ padding: 8 }}>
                           {typeof enabled === "boolean" ? (enabled ? "true" : "false") : <span className="muted">n/a</span>}
