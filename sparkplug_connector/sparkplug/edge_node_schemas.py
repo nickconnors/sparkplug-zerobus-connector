@@ -13,6 +13,12 @@ at stop are logged and dropped: the next NBIRTH (or ``create_all_edge_node_schem
 A procedure's name goes into the statement's text (identifiers can't be bound), so it must be a
 three-part name (``nbirth_procedures``).
 
+After each call it checks that the procedure made the edge node's objects (``check_views``, on by default): in the
+procedure's catalog, the schema ``<prefix>_<group>_<edge node>`` and, for each model (each top-level Template metric
+of the NBIRTH), the views ``<model>_vw`` and ``<model>_asof_vw``; names as the procedure makes them, lower case, each
+run of characters other than ``[A-Za-z0-9]`` replaced by ``_`` (``node_schema_name``, ``model_view_names``). An NBIRTH
+without models: the schema only. Something missing fails the attempt: the procedure is called again at the next one.
+
 SQL runs on a SQL warehouse through the Statement Execution API as the Zerobus service principal (OAuth
 M2M). It needs the ``databricks-sql-access`` entitlement, ``CAN USE`` on the warehouse, and in each node
 catalog ``USE CATALOG`` + ``CREATE SCHEMA``, ``USE SCHEMA``, ``EXECUTE`` on the procedure and ``SELECT`` on
@@ -44,6 +50,42 @@ def retry_delay(attempt: int) -> float:
 # catalog.schema.procedure; each part plain or backquoted (no backquote or line break inside)
 _PART = r"(?:[A-Za-z0-9_]+|`[^`\r\n]+`)"
 PROCEDURE_NAME = re.compile(rf"{_PART}\.{_PART}\.{_PART}")
+_CATALOG = re.compile(rf"({_PART})\.")
+_NOT_ALNUM = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _normalized(name: str) -> str:
+    """A name as the procedure makes it: lower case, each run of characters other than [A-Za-z0-9] -> "_"."""
+    return _NOT_ALNUM.sub("_", name).lower()
+
+
+def node_schema_name(prefix: str, group_id: str, edge_node_id: str) -> str:
+    """The edge node's schema, as the procedure names it."""
+    return _normalized(f"{prefix}_{group_id}_{edge_node_id}")
+
+
+def birth_models(msg: str) -> tuple[str, ...]:
+    """The models of an NBIRTH (its ``msg`` JSON): each top-level Template metric, named as the procedure names its
+    views (the metric's name and ``version``; Tahu's JSON has no ``version`` on a metric, so the name)."""
+    try:
+        metrics = json.loads(msg).get("metrics") or []
+    except (ValueError, AttributeError):
+        return ()
+    models = []
+    for m in metrics:
+        if isinstance(m, dict) and m.get("dataType") == "Template" and isinstance(m.get("name"), str):
+            model = _normalized(m["name"] + str(m.get("version") or ""))
+            if model not in models:
+                models.append(model)
+    return tuple(models)
+
+
+def model_view_names(model: str) -> tuple[str, str]:
+    return f"{model}_vw", f"{model}_asof_vw"
+
+
+class ObjectsMissing(Exception):
+    """The procedure returned, but the edge node's schema or views aren't there."""
 
 
 def quoted_table(name: str) -> str:
@@ -79,6 +121,7 @@ class Birth:
     group_id: str
     edge_node_id: str
     msg_id: str
+    models: tuple[str, ...] = ()                    # birth_models of its NBIRTH
 
     @property
     def key(self) -> str:
@@ -93,19 +136,21 @@ class NotifierStatus:
     gave_up: int
     pending: int
     last_error: str | None
+    checked: int = 0                                # calls whose schema and views were found
 
 
 class BirthNotifier:
     def __init__(self, sql: Sql, raw_table: str, procedures: list[str], prefix: str = "nb", coalesce_s: float = 2.0,
                  readable_within_s: float = 60.0, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, check_views: bool = True):
         self._raw_table = quoted_table(raw_table)
         procedures = nbirth_procedures({"procedures": procedures})
         self._sql, self._procedures, self._prefix = sql, procedures, prefix
         self._coalesce, self._readable_within, self._sleep, self._clock = coalesce_s, readable_within_s, sleep, clock
         self._latest: dict[str, Birth] = {}
         self._tasks: set[asyncio.Task] = set()
-        self._births = self._calls = self._failures = self._gave_up = 0
+        self._check_views = check_views
+        self._births = self._calls = self._failures = self._gave_up = self._checked = 0
         self._last_error: str | None = None
 
     def accept(self, records: list[str]) -> None:
@@ -117,7 +162,7 @@ class BirthNotifier:
             if row.get("message_type") != "NBIRTH":
                 continue
             self._births += 1
-            b = Birth(row["group_id"], row["edge_node_id"], row["msg_id"])
+            b = Birth(row["group_id"], row["edge_node_id"], row["msg_id"], birth_models(row.get("msg") or ""))
             self._latest[b.key] = b
             self._schedule(self._attempts(b, delay=self._coalesce))
 
@@ -147,9 +192,11 @@ class BirthNotifier:
                 t0 = time.monotonic()
                 await self._sql.execute(f"CALL {procedure}(:prefix, :group_id, :edge_node_id, false)",
                                         {"prefix": self._prefix, "group_id": b.group_id, "edge_node_id": b.edge_node_id})
-                done.add(procedure)
                 self._calls += 1
                 logger.info("%s for %s (NBIRTH %s) in %d ms", procedure, b.key, b.msg_id, (time.monotonic() - t0) * 1000)
+                if self._check_views:
+                    await self._check(procedure, b)     # ObjectsMissing: called again at the next attempt
+                done.add(procedure)
             if self._latest.get(b.key) is b:
                 del self._latest[b.key]
             return True
@@ -169,6 +216,24 @@ class BirthNotifier:
                            b.key, attempt + 1, MAX_ATTEMPTS, retry_delay(attempt), e)
             return False
 
+    async def _check(self, procedure: str, b: Birth) -> None:
+        """The edge node's schema and its models' views, in the procedure's catalog."""
+        catalog = _CATALOG.match(procedure).group(1)
+        schema = node_schema_name(self._prefix, b.group_id, b.edge_node_id)
+        if b.models:
+            rows = await self._sql.execute(f"SELECT table_name FROM {catalog}.information_schema.views "
+                                           "WHERE table_schema = :schema", {"schema": schema})
+            found = {r[0] for r in rows if r and r[0]}
+            missing = [v for m in b.models for v in model_view_names(m) if v not in found]
+        else:
+            rows = await self._sql.execute(f"SELECT count(*) FROM {catalog}.information_schema.schemata "
+                                           "WHERE schema_name = :schema", {"schema": schema})
+            missing = [] if rows and rows[0] and rows[0][0] not in (None, "0") else ["the schema"]
+        if missing:
+            raise ObjectsMissing(f"{procedure} returned, but {catalog}.{schema} lacks {', '.join(missing)}")
+        self._checked += 1
+        logger.info("%s.%s has the views of %d models for %s", catalog, schema, len(b.models), b.key)
+
     async def _await_readable(self, b: Birth) -> None:
         deadline = self._clock() + self._readable_within
         while True:
@@ -183,7 +248,8 @@ class BirthNotifier:
         self._latest[b.key] = b
 
     def status(self) -> NotifierStatus:
-        return NotifierStatus(self._births, self._calls, self._failures, self._gave_up, len(self._latest), self._last_error)
+        return NotifierStatus(self._births, self._calls, self._failures, self._gave_up, len(self._latest), self._last_error,
+                              self._checked)
 
     async def stop(self) -> None:
         for task in list(self._tasks):

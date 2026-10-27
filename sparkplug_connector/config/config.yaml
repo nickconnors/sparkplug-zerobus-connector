@@ -108,6 +108,7 @@ sources:
     warehouse_id: ''
     procedures: [bridge_node_db.stage_db.create_edge_node_schema]
     schema_prefix: nb
+    check_views: true              # after each call: the edge node's schema and its models' views exist (else retried)
 zerobus:
   enabled: true
   workspace_host: '${env:DATABRICKS_HOST}'

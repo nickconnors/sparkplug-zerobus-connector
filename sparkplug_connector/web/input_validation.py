@@ -318,6 +318,8 @@ def validate_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
             raise ValidationError("NBIRTH procedure: at least one catalog.schema.procedure when the call is on")
         if ens.get('enabled') is True and not str(ens.get('warehouse_id') or '').strip():
             raise ValidationError("SQL warehouse ID: needed when the NBIRTH call is on")
+        if 'check_views' in ens and not isinstance(ens['check_views'], bool):
+            raise ValidationError("Check the views after the NBIRTH call: true or false")
 
     # Sparkplug B primary host: refused here, not only when the source starts with it
     state_format = str(validated.get('state_format') or '').strip().lower()

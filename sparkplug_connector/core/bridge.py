@@ -439,7 +439,8 @@ class Bridge:
                 return
             sql = DatabricksSql(table.workspace_url, table.client_id, table.client_secret, warehouse_id)
             notifier = BirthNotifier(sql, table.full_table_name, procedures,
-                                     prefix=str(schemas.get('schema_prefix') or '').strip() or 'nb')
+                                     prefix=str(schemas.get('schema_prefix') or '').strip() or 'nb',
+                                     check_views=_enabled(schemas.get('check_views', True)))
             writer.add_listener(notifier.accept)
             self.birth_notifiers[source_name] = notifier
             self._notifier_writers[source_name] = writer
@@ -747,7 +748,8 @@ class Bridge:
                 n = notifier.status()
                 h.update({'nbirths_written': n.births, 'edge_node_schema_calls': n.calls,
                           'edge_node_schema_failures': n.failures, 'edge_node_schema_gave_up': n.gave_up,
-                          'edge_node_schema_pending': n.pending, 'edge_node_schema_last_error': n.last_error})
+                          'edge_node_schema_pending': n.pending, 'edge_node_schema_last_error': n.last_error,
+                          'edge_node_schema_checked': n.checked})
             out[name] = h
         return out
 

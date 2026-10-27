@@ -87,7 +87,8 @@ works: the schema prefix, the group id, the edge node id and whether to recreate
 SQL, not of the connector. Only NBIRTHs call it: the template definitions the views are built from come
 in the NBIRTH, and a DBIRTH is handled like data. The service principal then owns the
 `<prefix>_<group>_<edge node>` schemas it creates, so readers need `USE CATALOG, USE SCHEMA, SELECT` on
-the node catalog.
+the node catalog. The check after the call (`check_views`) reads the node catalog's `information_schema`, where the
+service principal sees the schemas and views it owns: no further grant.
 
 ## Configuration
 
@@ -113,6 +114,7 @@ sources:
       warehouse_id: ...                    # SQL warehouse; the Zerobus service principal runs the call
       procedures: [bridge_node_db.stage_db.create_edge_node_schema]   # catalog.schema.procedure, one or more
       schema_prefix: nb
+      check_views: true                    # after each call: the schema and the models' views exist (below)
     # security:                            # TLS (protocols/mqtt_security.py); on with mqtts:// or use_tls: true
     #   ca_cert_path: /certs/ca.pem        # a private CA (default: the system's)
     #   client_cert_path: /certs/client.pem   # client certificate and key: mutual TLS
@@ -189,6 +191,12 @@ one with the same id fights over STATE, and two connectors with different ids wr
 - **NBIRTH** (`edge_node_schemas.py`): once Zerobus has acknowledged an NBIRTH and it is readable in the
   table, each NBIRTH procedure is called, off the MQTT and Zerobus paths; NBIRTHs of one
   edge node within 2 s make one call; a failed call is retried for ~5 minutes, then given up and counted.
+  With `check_views` (on by default), after each call the connector looks in the procedure's catalog
+  (`information_schema`) for the edge node's schema, `<prefix>_<group>_<edge node>`, and for each model of the
+  NBIRTH (each top-level Template metric) its views `<model>_vw` and `<model>_asof_vw`, named as
+  `create_edge_node_schema` names them (lower case, each run of characters other than `[A-Za-z0-9]` -> `_`); an
+  NBIRTH without models needs the schema only. Something missing counts as a failed call: the procedure is called
+  again at the next retry. Switch it off for a procedure that makes other objects.
 
 ## Rows and rebirth requests
 
@@ -231,8 +239,8 @@ Messages held for a missing `seq` are in memory only: a crash or stop loses them
 `payloads_undecodable`, `state_republished`, `rows_failed`, `queue_depth`, `queue_high_water`, `queue_dropped`,
 `zerobus_stream_open`, `rows_written`, `rows_too_large`, `rows_unconvertible`, `zerobus_failures`, `batch_in_flight`,
 `zerobus_failing_since`, `batch_pending_since`, `zerobus_last_success`, `last_error`; with
-`edge_node_schemas`: `nbirths_written`, `edge_node_schema_calls`, `..._failures`, `..._gave_up`,
-`..._pending`, `..._last_error`; with the write-ahead log: `wal_pending`, `wal_rows_appended`,
+`edge_node_schemas`: `nbirths_written`, `edge_node_schema_calls`, `..._checked` (calls whose schema and views were
+found), `..._failures`, `..._gave_up`, `..._pending`, `..._last_error`; with the write-ahead log: `wal_pending`, `wal_rows_appended`,
 `wal_rows_replayed`, `wal_rows_not_logged`, `wal_bytes`, `wal_failures`, `wal_last_error`; the sequence
 handling: `sequence_handling`, `messages_held`, `messages_reordered`, `messages_dropped` and `dropped` (by
 reason: `gap_timeout`, `pruned_at_nbirth`, `replaced_seq`, `no_seq`, `unknown_node`, `node_offline`,

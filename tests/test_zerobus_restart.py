@@ -14,6 +14,8 @@ from test_per_target_queues import rows, wait_for
 from test_sparkplug_source import broker, publish  # noqa: F401 - broker: a fixture
 from test_wal import bridge_config, fake_streams, ids  # noqa: F401 - fake_streams is a fixture
 from sparkplug_connector.core import bridge as core_bridge
+from sparkplug_connector.sparkplug import to_tahu_json
+from sparkplug_connector.sparkplug.edge_node_schemas import birth_models
 from sparkplug_connector.protocols.base import ProtocolType
 from sparkplug_connector.sparkplug.raw_row import convert
 
@@ -311,7 +313,7 @@ async def test_the_sparkplug_health_of_a_primary_host_and_of_a_plain_subscriber(
 
     class Sql(FakeSql):
         def __init__(self, *args):
-            super().__init__()
+            super().__init__(models=birth_models(to_tahu_json(NBIRTH)))     # the procedure makes the NBIRTH's views
             made.append(self)
     monkeypatch.setattr(core_bridge, "DatabricksSql", Sql)
     endpoint, port = broker
@@ -325,7 +327,7 @@ async def test_the_sparkplug_health_of_a_primary_host_and_of_a_plain_subscriber(
     try:
         await wait_for(lambda: all(n in bridge.clients and bridge.clients[n].subscribed.is_set() for n in ("sp", "plain")), 10)
         await publish(port, [("spBv1.0/Plant1/NBIRTH/Line A", NBIRTH)])
-        await wait_for(lambda: made and made[0].calls(), 15)
+        await wait_for(lambda: "sp" in bridge.birth_notifiers and bridge.birth_notifiers["sp"].status().checked, 15)
         health = bridge.sparkplug_health()
     finally:
         await bridge.stop()
@@ -333,10 +335,11 @@ async def test_the_sparkplug_health_of_a_primary_host_and_of_a_plain_subscriber(
     assert {k: sp[k] for k in ("state", "primary_host_id", "mqtt_connected", "mqtt_online", "rows_queued", "rows_failed",
                                "rows_written", "rows_unconvertible", "batch_in_flight", "queue_dropped", "wal_pending",
                                "wal_rows_appended", "nbirths_written", "edge_node_schema_calls",
-                               "edge_node_schema_failures")} == {
+                               "edge_node_schema_failures", "edge_node_schema_checked")} == {
         "state": "ONLINE", "primary_host_id": "databricks-zerobus", "mqtt_connected": True, "mqtt_online": True,
         "rows_queued": 1, "rows_failed": 0, "rows_written": 1, "rows_unconvertible": 0, "batch_in_flight": 0,
         "queue_dropped": 0, "wal_pending": 0, "wal_rows_appended": 1, "nbirths_written": 1, "edge_node_schema_calls": 1,
-        "edge_node_schema_failures": 0}
+        "edge_node_schema_failures": 0, "edge_node_schema_checked": 1}
+    assert made[0].lookups == [("c", "nb_plant1_line_a")] and len(made[0].models) > 0
     assert sp["state_topic"] == "spBv1.0/STATE/databricks-zerobus" and sp["zerobus_last_success"].endswith("Z")
     assert (plain["state"], plain["primary_host_id"], plain["rows_queued"]) == ("ONLINE", None, 0)   # connected

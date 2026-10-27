@@ -14,7 +14,9 @@ from sparkplug_connector.sparkplug.edge_node_schemas import (
     BirthNotifier,
     DatabricksSql,
     SqlError,
+    birth_models,
     nbirth_procedures,
+    node_schema_name,
     retry_delay,
 )
 
@@ -24,13 +26,25 @@ SDP = "sdp.stage_db.create_edge_node_schema"
 
 
 class FakeSql:
-    """Records the statements; readable after ``readable_after`` checks; CALLs fail ``fail_calls`` times."""
+    """Records the statements; readable after ``readable_after`` checks; CALLs fail ``fail_calls`` times. A CALL
+    that succeeds makes the edge node's schema in the procedure's catalog and the views of ``models`` (none for the
+    next ``calls_making_nothing`` calls); ``lookups``: the information_schema queries (catalog, schema)."""
 
-    def __init__(self):
+    def __init__(self, models=()):
         self.log: list[str] = []
-        self.readable_after = self.fail_calls = self.checks = self.call_attempts = 0
+        self.lookups: list[tuple[str, str]] = []
+        self.readable_after = self.fail_calls = self.checks = self.call_attempts = self.calls_making_nothing = 0
+        self.models = tuple(models)
+        self.objects: dict[tuple[str, str], set[str]] = {}      # (catalog, schema) -> views
 
     async def execute(self, statement, params):
+        if "information_schema" in statement:
+            catalog = statement.split(" FROM ")[1].split(".information_schema")[0]
+            self.lookups.append((catalog, params["schema"]))
+            views = self.objects.get((catalog, params["schema"]))
+            if ".views " in statement:
+                return [[v] for v in sorted(views or ())]
+            return [["0" if views is None else "1"]]
         if statement.startswith("SELECT count(*)"):
             self.log.append(f"check {params['msg_id']}")
             self.checks += 1
@@ -40,6 +54,13 @@ class FakeSql:
         self.call_attempts += 1
         if self.call_attempts <= self.fail_calls:
             raise RuntimeError("PERMISSION_DENIED (test)")
+        if self.calls_making_nothing:
+            self.calls_making_nothing -= 1
+            return []
+        catalog = statement.split("CALL ")[1].split(".")[0]
+        views = self.objects.setdefault((catalog, node_schema_name(params["prefix"], params["group_id"],
+                                                                   params["edge_node_id"])), set())
+        views.update(v for m in self.models for v in (f"{m}_vw", f"{m}_asof_vw", m))
         return []
 
     def calls(self):
@@ -50,10 +71,19 @@ async def no_sleep(_):
     await asyncio.sleep(0)
 
 
-def row(message_type, group, edge, msg_id):
+def row(message_type, group, edge, msg_id, msg="{}"):
     return json.dumps({"msg_id": msg_id, "msg_topic": f"spBv1.0/{group}/{message_type}/{edge}", "namespace": "spBv1.0",
                        "group_id": group, "message_type": message_type, "edge_node_id": edge, "device_id": None,
-                       "msg": "{}", "inserted_at": "1"}, separators=(",", ":"))
+                       "msg": msg, "inserted_at": "1"}, separators=(",", ":"))
+
+
+def nbirth_msg(*templates: str) -> str:
+    """An NBIRTH's Tahu JSON with bdSeq, a plain metric and a Template definition per name."""
+    metrics = [{"name": "bdSeq", "timestamp": 1, "dataType": "Int64", "value": 0},
+               {"name": "Node Control/Rebirth", "timestamp": 1, "dataType": "Boolean", "value": False}]
+    metrics += [{"name": t, "timestamp": 1, "dataType": "Template",
+                 "value": {"version": "", "reference": "", "isDefinition": True, "metrics": []}} for t in templates]
+    return json.dumps({"timestamp": 1, "metrics": metrics, "seq": 0}, separators=(",", ":"))
 
 
 async def wait_until(condition, timeout=5.0):
@@ -150,7 +180,7 @@ async def test_the_raw_table_is_quoted_so_any_unity_catalog_name_works():
 
     n = BirthNotifier(Sql(), "my-catalog.stage_db.sparkplug_raw", [V1], coalesce_s=0, sleep=no_sleep)
     n.accept([row("NBIRTH", "G", "E", "n1")])
-    await wait_until(lambda: len(statements) == 2)
+    await wait_until(lambda: len(statements) >= 2)
     assert statements[0] == "SELECT count(*) FROM `my-catalog`.`stage_db`.`sparkplug_raw` WHERE msg_id = :msg_id"
     await n.stop()
 
@@ -256,3 +286,76 @@ async def test_an_http_error_raises_with_the_status_and_body():
     with pytest.raises(SqlError, match="HTTP 403 on /oidc/v1/token: Invalid client"):
         await sql.execute("SELECT 1", {})
     await sql.close()
+
+
+# ----------------------------------------------------------------------------- the schema and views after the call
+
+def test_names_as_the_procedure_makes_them():
+    assert node_schema_name("nb", "Plant 1", "Line-A.2") == "nb_plant_1_line_a_2"
+    assert node_schema_name("nb", "G", "E") == "nb_g_e"
+    assert birth_models(nbirth_msg("Motor", "Pump UDT", "_types_/Conveyor-v2", "Motor")) == (
+        "motor", "pump_udt", "_types_conveyor_v2")
+    assert birth_models(nbirth_msg()) == ()
+    assert birth_models("not json") == () and birth_models("[]") == ()
+
+
+async def test_an_nbirth_with_models_is_checked_for_its_views_in_the_procedures_catalog():
+    sql = FakeSql(models=("motor", "pump_udt"))
+    n = BirthNotifier(sql, RAW, [V1, "`node-db`.stage_db.create_edge_node_schema"], coalesce_s=0, sleep=no_sleep)
+    n.accept([row("NBIRTH", "Plant 1", "Line-A", "n1", nbirth_msg("Motor", "Pump UDT"))])
+    await wait_until(lambda: n.status().checked == 2)
+    assert sql.lookups == [("v1", "nb_plant_1_line_a"), ("`node-db`", "nb_plant_1_line_a")]
+    s = n.status()
+    assert (s.calls, s.checked, s.failures, s.pending, s.last_error) == (2, 2, 0, 0, None)
+    await n.stop()
+
+
+async def test_missing_views_fail_the_attempt_and_the_procedure_is_called_again():
+    sql = FakeSql(models=("motor",))
+    sql.calls_making_nothing = 1                            # the first CALL returns without making anything
+    n = BirthNotifier(sql, RAW, [V1, SDP], coalesce_s=0, sleep=no_sleep)
+    await run_directly(n, Birth("G", "E", "n1", ("motor",)))
+    assert sql.calls() == ["CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",       # made nothing
+                           "CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",       # called again
+                           "CALL sdp.stage_db.create_edge_node_schema(nb, G, E, false)"]
+    s = n.status()
+    assert (s.calls, s.checked, s.failures, s.gave_up) == (3, 2, 1, 0)
+    assert "v1.nb_g_e lacks motor_vw, motor_asof_vw" in s.last_error
+
+
+async def test_only_the_views_still_missing_are_named():
+    sql = FakeSql(models=("motor",))
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep)
+    await run_directly(n, Birth("G", "E", "n1", ("motor", "pump")))     # the procedure makes no pump views
+    s = n.status()
+    assert (s.failures, s.gave_up, s.checked) == (MAX_ATTEMPTS, 1, 0)
+    assert s.last_error.endswith("lacks pump_vw, pump_asof_vw")
+    assert len(sql.calls()) == MAX_ATTEMPTS
+
+
+async def test_an_nbirth_without_models_needs_its_schema_only():
+    sql = FakeSql()
+    sql.calls_making_nothing = 1
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep)
+    await run_directly(n, Birth("G", "E", "n1"))
+    s = n.status()
+    assert (s.calls, s.checked, s.failures) == (2, 1, 1) and "lacks the schema" in s.last_error
+
+
+async def test_the_check_can_be_switched_off():
+    sql = FakeSql()
+    sql.calls_making_nothing = 10
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep, check_views=False)
+    await run_directly(n, Birth("G", "E", "n1", ("motor",)))
+    s = n.status()
+    assert (s.calls, s.checked, s.failures) == (1, 0, 0) and sql.lookups == []
+
+
+async def test_a_newer_nbirth_is_checked_for_its_own_models():
+    sql = FakeSql(models=("motor", "pump"))
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0.2)
+    n.accept([row("NBIRTH", "G", "E", "n1", nbirth_msg("Motor"))])
+    n.accept([row("NBIRTH", "G", "E", "n2", nbirth_msg("Motor", "Pump"))])
+    await wait_until(lambda: n.status().checked == 1)
+    assert n.status().failures == 0 and sql.lookups == [("v1", "nb_g_e")]
+    await n.stop()
