@@ -5,7 +5,9 @@
 Each Sparkplug message becomes one ``sparkplug_raw`` row, written unchanged. Every table's batches are kept
 until Zerobus acknowledges them (``core/confirmed_writer.py``), so a primary host can follow its table's writer:
 ONLINE while Databricks accepts the rows, OFFLINE (the edges buffer) otherwise (``sparkplug/host.py``). After
-an NBIRTH is written, the source's NBIRTH procedures are called (``sparkplug/edge_node_schemas.py``).
+an NBIRTH is written, the source's NBIRTH procedures are called (``sparkplug/edge_node_schemas.py``). With
+``diagnostics.enabled``, the connector's own diagnostics edge nodes go into the default table too
+(``sparkplug/diagnostics.py``).
 """
 
 import asyncio
@@ -22,8 +24,10 @@ from sparkplug_connector.protocols.factory import create_protocol_client
 from sparkplug_connector.core.backpressure import BackpressureManager
 from sparkplug_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
 from sparkplug_connector.core.wal import SEQ_FIELD, WriteAheadLog
+from sparkplug_connector.core import __version__
 from sparkplug_connector.core import targets as source_tables
 from sparkplug_connector.sparkplug import raw_row
+from sparkplug_connector.sparkplug.diagnostics import REFRESH_S, Diagnostics, Tracker
 from sparkplug_connector.sparkplug.edge_node_schemas import BirthNotifier, DatabricksSql, nbirth_procedures, quoted_table
 from sparkplug_connector.sparkplug.host import HostState, HostSupervisor
 
@@ -110,6 +114,20 @@ class Bridge:
         self.clients: Dict[str, ProtocolClient] = {}
         self.client_tasks: Dict[str, asyncio.Task] = {}
 
+        # diagnostics: the connector's own edge nodes, rows into the default table (off by default)
+        self.diagnostics_config = config.get('diagnostics') or {}
+        self.diagnostics: Optional[Diagnostics] = None
+        self.diagnostics_task: Optional[asyncio.Task] = None
+        self.diagnostics_rows = 0
+        if _enabled(self.diagnostics_config.get('enabled', False)):
+            tracker = Tracker()
+            for source in self.sources:
+                if source.get('enabled', True) and source.get('protocol', 'sparkplug') == 'sparkplug':
+                    name = source.get('name', '')
+                    tracker.add_client(name, str(source.get('client_id') or f'dbx-{name}'), str(source.get('endpoint') or ''))
+            self.diagnostics = Diagnostics(tracker, self.diagnostics_config, version=__version__,
+                                           primary_host_id=self._primary_host_id)
+
         # Reconnection settings
         self.reconnect_enabled = True
         self.reconnect_initial_delay_sec = 1.0
@@ -153,6 +171,8 @@ class Bridge:
             self.zerobus_enabled = True
         else:
             logger.info("ZeroBus disabled - data collection only mode")
+        if self.diagnostics is not None and self.diagnostics_task is None:
+            self.diagnostics_task = asyncio.create_task(self._run_diagnostics())
 
         self.running = True
         self._starting = False
@@ -195,6 +215,9 @@ class Bridge:
                 continue
             if target_config.get('workspace_host'):
                 targets[self._get_target_id(target_config)] = target_config
+        default_target = self.zerobus_config.get('default_target') or {}
+        if self.diagnostics is not None and default_target.get('workspace_host'):
+            targets.setdefault(self._get_target_id(default_target), default_target)     # the diagnostics' table
 
         for target_id, target_config in targets.items():
             await self._create_target(target_id, target_config)
@@ -375,6 +398,8 @@ class Bridge:
         )
 
         self.clients[source_name] = client
+        if self.diagnostics is not None:
+            self.diagnostics.tracker.add_client(source_name, str(getattr(client, 'client_id', '') or ''), str(client.endpoint))
         self._attach_sparkplug(source_name, source_config, client)
 
         task = asyncio.create_task(self._client_lifecycle(source_name, client))
@@ -440,7 +465,8 @@ class Bridge:
             sql = DatabricksSql(table.workspace_url, table.client_id, table.client_secret, warehouse_id)
             notifier = BirthNotifier(sql, table.full_table_name, procedures,
                                      prefix=str(schemas.get('schema_prefix') or '').strip() or 'nb',
-                                     check_views=_enabled(schemas.get('check_views', True)))
+                                     check_views=_enabled(schemas.get('check_views', True)),
+                                     schema_only_groups=frozenset({self.diagnostics.group_id}) if self.diagnostics else frozenset())
             writer.add_listener(notifier.accept)
             self.birth_notifiers[source_name] = notifier
             self._notifier_writers[source_name] = writer
@@ -462,6 +488,7 @@ class Bridge:
                 await client.connect()
                 logger.info(f"[{source_name}] ✓ Connected")
                 connected_at = time.monotonic()
+                self._diagnose_client(source_name, True)
 
                 logger.info(f"[{source_name}] Starting data collection...")
                 await client.subscribe()
@@ -472,12 +499,15 @@ class Bridge:
 
                 # Cleanup on shutdown
                 await client.disconnect()
+                self._diagnose_client(source_name, False)
                 reconnect_delay = self.reconnect_initial_delay_sec
 
                 if self._shutdown:
                     break
 
             except Exception as e:
+                if connected_at is not None:
+                    self._diagnose_client(source_name, False)
                 if self._shutdown or source_name in self._stopping_sources:
                     logger.info(f"[{source_name}] subscription ended: the source is stopping")
                     break
@@ -593,7 +623,39 @@ class Bridge:
 
     def _on_record(self, row: "raw_row.RawRow", source_name: Optional[str] = None):
         """A Sparkplug row from a source: queued for its target table unchanged (no source: the default table)."""
+        if self.diagnostics is not None:
+            try:
+                self.diagnostics.tracker.on_row(row)
+            except Exception as e:  # noqa: BLE001 - the counters must not cost the row
+                logger.warning(f"[{source_name}] diagnostics counters: {type(e).__name__}: {e}")
         self._on_raw_row(row, self._queue_for_source(source_name))
+
+    def _diagnose_client(self, source_name: str, connected: bool) -> None:
+        if self.diagnostics is not None:
+            self.diagnostics.tracker.on_client(source_name, connected)
+
+    def _primary_host_id(self) -> Optional[str]:
+        """The diagnostics' PrimaryHostId: the first enabled Sparkplug source's primary host id (None: none is one)."""
+        for source in self.sources:
+            if source.get('enabled', True) and str(source.get('primary_host_id') or '').strip():
+                return str(source['primary_host_id']).strip()
+        return None
+
+    async def _run_diagnostics(self) -> None:
+        """The diagnostics' births at start, then every 10 s a DDATA per diagnostics edge node if anything changed."""
+        queue = self.backpressure                   # the default table's
+        logger.info(f"Diagnostics: edge nodes in group {self.diagnostics.group_id}, into the default table")
+        rows = self.diagnostics.start_rows()
+        while True:
+            for row in rows:
+                self._enqueue_fast(row.to_zerobus_record(), queue)
+            self.diagnostics_rows += len(rows)
+            await asyncio.sleep(REFRESH_S)
+            try:
+                rows = self.diagnostics.refresh_rows()
+            except Exception as e:  # noqa: BLE001 - the next refresh tries again
+                logger.warning(f"Diagnostics: refresh failed: {type(e).__name__}: {e}")
+                rows = []
 
     def _on_raw_row(self, row: "raw_row.RawRow", queue: BackpressureManager) -> None:
         self.metrics['records_received'] += 1
@@ -649,6 +711,11 @@ class Bridge:
         logger.info("Stopping the bridge...")
         self._shutdown = True
         self._starting = False
+
+        if self.diagnostics_task is not None:
+            self.diagnostics_task.cancel()
+            await asyncio.gather(self.diagnostics_task, return_exceptions=True)
+            self.diagnostics_task = None
 
         # Sparkplug primary hosts: no supervisor may go ONLINE again while stopping
         for task in self.host_tasks.values():
@@ -964,5 +1031,7 @@ class Bridge:
             'zerobus_enabled': self.zerobus_enabled,
             'zerobus_targets': list(self.tables.keys()),
             'backpressure_queue_size': self._backpressure_metrics().get('current_queue_depth', 0),
+            'diagnostics': None if self.diagnostics is None else {'group_id': self.diagnostics.group_id,
+                                                                  'rows_queued': self.diagnostics_rows},
             'metrics': self.get_metrics(),
         }

@@ -132,6 +132,13 @@ zerobus:
     max_records: 500
     linger_seconds: 0.2
   source_targets: {}
+diagnostics:                       # the connector's own edge nodes, as rows in zerobus.default_target (no MQTT)
+  enabled: false
+  group_id: BRIDGE                 # their Sparkplug group (schemas <prefix>_<group>_<edge node>)
+  bridge_model: BRIDGE             # the bridge model's name: template, instance Core/<model>, metric "<model> Version"
+  # bridge_info_edge_node_id: Bridge Info
+  # edge_node_info_edge_node_id: Edge Node Info
+  # mqtt_client_info_edge_node_id: MQTT Client Info
 backpressure:
   memory_queue:                    # per table; a primary host goes OFFLINE at 80% full
     max_size: 100000

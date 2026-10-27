@@ -359,3 +359,13 @@ async def test_a_newer_nbirth_is_checked_for_its_own_models():
     await wait_until(lambda: n.status().checked == 1)
     assert n.status().failures == 0 and sql.lookups == [("v1", "nb_g_e")]
     await n.stop()
+
+
+async def test_a_schema_only_group_needs_its_schema_only():
+    """The connector's diagnostics edge nodes: their NBIRTH has models, but only the schema is checked."""
+    sql = FakeSql()                                          # the procedure makes the schema, no views
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep, schema_only_groups=frozenset({"BRIDGE"}))
+    await run_directly(n, Birth("BRIDGE", "Bridge Info", "n1", ("bridge",)))
+    await run_directly(n, Birth("G", "E", "n2", ("motor",)))  # another group: its views are checked
+    s = n.status()
+    assert (s.checked, s.failures) == (1, MAX_ATTEMPTS) and "nb_g_e lacks motor_vw" in s.last_error

@@ -1,0 +1,22 @@
+{
+  "comment": "test_diagnostics.py: the diagnostics rows for this state at start_ms, then one refresh at refresh_ms; every metric stamped metric_ts; expected/diagnostics/scenario_rows.json",
+  "time_zone": "America/New_York",
+  "group_id": "BRIDGE",
+  "bridge_model": "BRIDGE",
+  "edge_node_ids": {"bridge": "Bridge Info", "edge_node": "Edge Node Info", "mqtt_client": "MQTT Client Info"},
+  "start_ms": 1790696925611,
+  "refresh_ms": 1790696935611,
+  "metric_ts": 1790696925600,
+  "bridge": {"version": "1.0.0", "primary_host_id": "databricks-zerobus", "connected": 1, "disconnected": 1,
+             "mqtt_message_count": 42, "model_count": 2, "instance_count": 3},
+  "edge_nodes": [
+    {"group_id": "Plant1", "edge_node_id": "Line A", "connected": true, "connect_ms": 1790696900000,
+     "disconnect_ms": 0, "births": 1, "deaths": 0, "messages": 30},
+    {"group_id": "Plant1", "edge_node_id": "Line B", "connected": false, "connect_ms": 1790696800000,
+     "disconnect_ms": 1790696850000, "births": 2, "deaths": 2, "messages": 12}
+  ],
+  "clients": [
+    {"client_id": "databricks-sparkplug", "connected": true, "connect_ms": 1790696890000, "disconnect_ms": null,
+     "server_url": "tcp://chariot:1883", "server_name": "sparkplug"}
+  ]
+}

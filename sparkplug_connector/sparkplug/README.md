@@ -197,6 +197,25 @@ one with the same id fights over STATE, and two connectors with different ids wr
   `create_edge_node_schema` names them (lower case, each run of characters other than `[A-Za-z0-9]` -> `_`); an
   NBIRTH without models needs the schema only. Something missing counts as a failed call: the procedure is called
   again at the next retry. Switch it off for a procedure that makes other objects.
+- **Diagnostics** (`diagnostics.py`, `diagnostics.enabled`, off by default): the connector's own edge nodes,
+  whose rows it writes into `zerobus.default_target` itself (nothing on MQTT), in the group `diagnostics.group_id`
+  (default `BRIDGE`), each with one device named after its model; templates version `v2.0.0`:
+
+  | Edge node (setting, default) | Device, instances | Metrics |
+  |---|---|---|
+  | `bridge_info_edge_node_id`, `Bridge Info` | `<bridge_model>` (`diagnostics.bridge_model`, default `BRIDGE`), `Core/<bridge_model>` | `<bridge_model> Version`, `PrimaryHostId` (the first source's), `ConnectedEdgeNodes`, `DisconnectedEdgeNodes`, `MQTTMessageCount`, `ModelCount`, `InstanceCount` |
+  | `edge_node_info_edge_node_id`, `Edge Node Info` | `EdgeNode`, `Core/EdgeNode-<edge node id>` per edge node seen | `GroupId`, `EdgeNodeId`, `Connected`, `ConnectDateTime`, `DisconnectDateTime`, `BirthCount`, `DeathCount`, `MQTTMessageCount` |
+  | `mqtt_client_info_edge_node_id`, `MQTT Client Info` | `MQTTClient`, `Core/MQTTClient` per Sparkplug source | `ClientID`, `Connected`, `ConnectDateTime`, `DisconnectDateTime`, `ServerUrl`, `ServerName` (the source's name) |
+
+  At start an NBIRTH (`bdSeq`, the template definitions) and a DBIRTH (the instances) per edge node, then every
+  10 s a DDATA per edge node if anything changed; no NDEATH. The JSON is the shape a Java host builds these payloads
+  in, its quirks kept: each metric stamped with the time it was built; dates as Java's `Date.toString()`
+  (`Tue Sep 29 11:48:45 EDT 2026`, the process's time zone; epoch 0 when unknown, `"null"` for an MQTT client never
+  connected); `Connected` a String in the EdgeNode definition and in MQTTClient, a Boolean in EdgeNode instances; the
+  Edge Node Info DBIRTH also carries an all-zero instance for itself. The counters follow the rows the sources hand
+  on (in `strict` mode, the messages the sequencing checks pass) and their connections. Their NBIRTHs call the NBIRTH
+  procedures like any edge node's; the check after the call needs their schema only. `GET /api/status`:
+  `diagnostics.rows_queued`.
 
 ## Rows and rebirth requests
 

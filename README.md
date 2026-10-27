@@ -11,7 +11,10 @@ row per Sparkplug message** to a Delta table through [Zerobus Ingest](https://do
   edges buffer (store and forward) whenever they can't get there.
 - **Confirmed writes**: a batch leaves the connector only once Zerobus has acknowledged it; an optional
   write-ahead log keeps unacknowledged rows across a crash or restart.
-- **A stored procedure call per NBIRTH** (optional), for example to (re)build per-model views.
+- **A stored procedure call per NBIRTH** (optional), for example to (re)build per-model views, then a check that
+  the edge node's schema and views exist.
+- **The connector's own diagnostics** (optional): three edge nodes of its own (bridge, edge nodes, MQTT clients)
+  whose rows go into the table like any edge node's.
 - **Strict Sparkplug sequencing** (by default): messages put back in `seq` order, an edge node's messages
   dropped after a gap until its rebirth, rebirth requests (NCMD) to edge nodes it hasn't seen born, as Eclipse
   Tahu's host library decides them (ported and tested against it); or a row for every message

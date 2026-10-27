@@ -17,7 +17,7 @@ After each call it checks that the procedure made the edge node's objects (``che
 procedure's catalog, the schema ``<prefix>_<group>_<edge node>`` and, for each model (each top-level Template metric
 of the NBIRTH), the views ``<model>_vw`` and ``<model>_asof_vw``; names as the procedure makes them, lower case, each
 run of characters other than ``[A-Za-z0-9]`` replaced by ``_`` (``node_schema_name``, ``model_view_names``). An NBIRTH
-without models: the schema only. Something missing fails the attempt: the procedure is called again at the next one.
+without models, or of a group in ``schema_only_groups`` (the connector's diagnostics): the schema only. Something missing fails the attempt: the procedure is called again at the next one.
 
 SQL runs on a SQL warehouse through the Statement Execution API as the Zerobus service principal (OAuth
 M2M). It needs the ``databricks-sql-access`` entitlement, ``CAN USE`` on the warehouse, and in each node
@@ -142,14 +142,15 @@ class NotifierStatus:
 class BirthNotifier:
     def __init__(self, sql: Sql, raw_table: str, procedures: list[str], prefix: str = "nb", coalesce_s: float = 2.0,
                  readable_within_s: float = 60.0, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-                 clock: Callable[[], float] = time.time, check_views: bool = True):
+                 clock: Callable[[], float] = time.time, check_views: bool = True,
+                 schema_only_groups: frozenset[str] = frozenset()):
         self._raw_table = quoted_table(raw_table)
         procedures = nbirth_procedures({"procedures": procedures})
         self._sql, self._procedures, self._prefix = sql, procedures, prefix
         self._coalesce, self._readable_within, self._sleep, self._clock = coalesce_s, readable_within_s, sleep, clock
         self._latest: dict[str, Birth] = {}
         self._tasks: set[asyncio.Task] = set()
-        self._check_views = check_views
+        self._check_views, self._schema_only = check_views, schema_only_groups
         self._births = self._calls = self._failures = self._gave_up = self._checked = 0
         self._last_error: str | None = None
 
@@ -220,7 +221,7 @@ class BirthNotifier:
         """The edge node's schema and its models' views, in the procedure's catalog."""
         catalog = _CATALOG.match(procedure).group(1)
         schema = node_schema_name(self._prefix, b.group_id, b.edge_node_id)
-        if b.models:
+        if b.models and b.group_id not in self._schema_only:
             rows = await self._sql.execute(f"SELECT table_name FROM {catalog}.information_schema.views "
                                            "WHERE table_schema = :schema", {"schema": schema})
             found = {r[0] for r in rows if r and r[0]}
