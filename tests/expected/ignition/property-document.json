@@ -1,0 +1,1 @@
+{"timestamp":1790696925611,"metrics":[{"name":"Motor/Speed","timestamp":1790696925611,"dataType":"Float","properties":{"engUnit":{"type":"String","value":"rpm"},"doc":{"type":"Document","value":"{\"a\":1,\"b\":[true,null]}"}},"value":72.5},{"name":"Motor/Run","timestamp":1790696925611,"dataType":"Boolean","value":true}],"seq":1}

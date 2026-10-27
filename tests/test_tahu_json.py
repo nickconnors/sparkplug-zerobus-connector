@@ -1,7 +1,8 @@
 """sparkplug_connector.sparkplug.to_tahu_json against Java Eclipse Tahu (the JSON the connector writes).
 
 Tests marked with the ``java_tahu`` fixture run Java Tahu on Java 17 through JPype and skip where it
-isn't available; the rest compare with outputs saved from it (``expected/``) or with fixed values.
+isn't available; the rest compare with outputs saved from it (``expected/``) or with fixed values. They run with the
+Ignition extensions off (``plain_tahu``): ``test_ignition_extensions.py`` tests those.
 """
 from __future__ import annotations
 
@@ -25,6 +26,12 @@ from sparkplug_connector.sparkplug import sparkplug_b_decode_pb2 as dpb
 
 TRANSMISSION = sorted((FIXTURES / "transmission").glob("*.bin"))
 CASES = payloads.all_cases()
+
+
+@pytest.fixture(autouse=True)
+def _plain_tahu():
+    with tahu_json.plain_tahu():
+        yield
 
 
 def _outcome(fn, raw: bytes) -> tuple[str, str]:
@@ -265,6 +272,9 @@ _F32 = st.floats(width=32).filter(lambda x: x != x or x == 0 or 2.0 ** -140 <= a
 _F64 = st.floats().filter(lambda x: x != x or x == 0 or 2.0 ** -1060 <= abs(x) < 2.0 ** 63)
 _U32 = st.integers(0, (1 << 32) - 1)
 _U64 = st.integers(0, (1 << 64) - 1)
+# Ignition's type codes (unknown to Tahu): property types DataSet, Array, Document; the DataSet column type Color
+_IGNITION_PROPERTY_TYPES = [16, (1 << 32) - 10001, (1 << 32) - 10002]
+_COLOR = (1 << 32) - 10000
 
 
 @st.composite
@@ -272,7 +282,7 @@ def _value_fields(draw, type_code: int, allow_unset: bool = True) -> dict:
     """protobuf value fields for a scalar of this type (sometimes the wrong field or none, like bad publishers)."""
     if allow_unset and draw(st.integers(0, 9)) == 0:
         return {}
-    if type_code in (1, 2, 3, 5, 6, 7):
+    if type_code in (1, 2, 3, 5, 6, 7, _COLOR):
         return {"int_value": draw(_U32)} if type_code != 7 or draw(st.booleans()) else {"long_value": draw(_U64)}
     if type_code in (4, 8, 13):
         return {"long_value": draw(_U64)}
@@ -289,7 +299,7 @@ def _value_fields(draw, type_code: int, allow_unset: bool = True) -> dict:
 def _properties(draw, depth: int = 0) -> dpb.Payload.PropertySet:
     ps = dpb.Payload.PropertySet()
     for _ in range(draw(st.integers(0, 5))):
-        type_code = draw(st.sampled_from(list(range(0, 15)) + ([20, 21] if depth < 1 else [])))
+        type_code = draw(st.sampled_from(list(range(0, 15)) + _IGNITION_PROPERTY_TYPES + ([20, 21] if depth < 1 else [])))
         v = dpb.Payload.PropertyValue(type=type_code)
         if draw(st.integers(0, 6)) == 0:
             v.is_null = True
@@ -307,7 +317,7 @@ def _properties(draw, depth: int = 0) -> dpb.Payload.PropertySet:
 
 @st.composite
 def _dataset(draw) -> dpb.Payload.DataSet:
-    types = draw(st.lists(st.integers(1, 14), max_size=4))
+    types = draw(st.lists(st.integers(1, 14) | st.just(_COLOR), max_size=4))
     ds = dpb.Payload.DataSet(num_of_columns=len(types) if draw(st.integers(0, 9)) else draw(st.integers(0, 5)),
                              types=types, columns=[draw(_s(6)) for _ in types])
     for _ in range(draw(st.integers(0, 3))):
@@ -339,7 +349,8 @@ def _metric(draw, depth: int = 0) -> dpb.Payload.Metric:
         if draw(st.integers(0, 2)) == 0:
             setattr(m, field, draw(st.booleans()))
     if draw(st.integers(0, 5)) == 0:
-        m.metadata.CopyFrom(dpb.Payload.MetaData(is_multi_part=draw(st.booleans()), file_name=draw(_s(6)), size=draw(_U64)))
+        m.metadata.CopyFrom(dpb.Payload.MetaData(is_multi_part=draw(st.booleans()), file_name=draw(_s(6)), size=draw(_U64),
+                                                 content_type=draw(st.sampled_from([b"", b"Alarm", b"AlarmReconciliation"]))))
     if draw(st.integers(0, 2)) == 0:
         m.properties.CopyFrom(draw(_properties()))
     if draw(st.integers(0, 12)) == 0:

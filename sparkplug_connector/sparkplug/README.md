@@ -5,7 +5,8 @@ Ignition with MQTT Transmission publishing to a Chariot MQTT server, or any othe
 Sparkplug 3.0 edge) and writes **one row per Sparkplug message** to a Delta table through Zerobus.
 
 - **One row per message**: the `sparkplug_raw` table below, `msg` holding the payload as Eclipse Tahu's
-  JSON, byte for byte what Java Tahu produces; splitting it into metrics is left to SQL.
+  JSON, byte for byte what Java Tahu produces, with Ignition's extra types (below); splitting it into metrics is
+  left to SQL.
 - **Sparkplug primary host application**: with `primary_host_id` set, the edges buffer their data
   (store and forward) whenever the rows can't reach Databricks, and send it once they can again.
 - **Confirmed writes**: a row leaves the connector only once Zerobus has acknowledged it; an optional
@@ -33,6 +34,19 @@ DDEATH); with `sequence_handling: strict` (the default) only those its checks pa
 `spBv1.0/...` topics and payloads that can't be decoded. The payload is kept whole: splitting it into
 metrics is left to SQL. A metric sent without a datatype (allowed outside births) gets its type from the
 edge node's or device's last birth, as a Tahu host application decodes it.
+
+**Ignition's extra types.** Ignition's MQTT Transmission sends types Sparkplug B doesn't define; they decode as an
+Ignition-aware Java host decodes them (Eclipse Tahu alone drops the metric that carries one):
+
+| In the payload | In `msg` |
+|---|---|
+| Property types DataSet (16), Array (-10001), Document (-10002) | `{"type":"Document","value":"<the property's string>"}` (likewise `DataSet`, `Array`) |
+| DataSet column type Color (-10000) | `"types"` lists `"Color"`; each cell is a `java.awt.Color` as Jackson writes it: `red`, `green`, `blue`, `alpha` (always 255), `colorSpace` (Java's sRGB profile, ~9.5 KB, the same in every cell), `transparency`, `rgb`. Java orders these keys differently from one start to the next |
+| `metaData.contentType` `Alarm` | a `String` metric with the alarm's text, whatever its datatype |
+| `metaData.contentType` `AlarmReconciliation` | a `DataSet` metric, whatever its datatype |
+
+Also as such a host does: a property that can't be decoded is left out (not its metric), and a null property value
+is left out of the JSON (`{"type":"String"}`, where Tahu writes `"value":null`).
 
 ## Databricks setup
 
@@ -270,4 +284,6 @@ calls), `../protocols/sparkplug_client.py` (the source), `../core/confirmed_writ
 Tests: `tests/` (Eclipse Tahu's Java implementation as the reference, through JPype:
 `java_tahu.py`; a real Mosquitto for the primary host: `test_primary_host.py`; test-only dependencies in
 `tests/requirements.txt`). The payload fixtures are synthetic, shaped like MQTT Transmission's
-(`make_fixtures.py`); `make_expected.py` writes Java Tahu's JSON for them.
+(`make_fixtures.py`); `make_expected.py` writes Java Tahu's JSON for them. Ignition's extra types:
+`ignition_payloads.py`, with the JSON of a Java decoder that has them in `expected/ignition/`
+(`test_ignition_extensions.py`); the Tahu tests run with them off (`tahu_json.plain_tahu()`).

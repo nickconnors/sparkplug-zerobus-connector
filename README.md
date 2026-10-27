@@ -5,8 +5,8 @@ Transmission publishing to a Chariot MQTT server, or any Sparkplug 3.0 edge) and
 row per Sparkplug message** to a Delta table through [Zerobus Ingest](https://docs.databricks.com/aws/en/ingestion/zerobus-overview).
 
 - **One row per message** in a `sparkplug_raw` table: the topic split into columns, the payload as Eclipse
-  Tahu's JSON (byte for byte what Java Tahu produces) in a `VARIANT` column. Splitting it into metrics is
-  left to SQL ([docs/UNITY_CATALOG_SCHEMAS.md](docs/UNITY_CATALOG_SCHEMAS.md) has sample queries).
+  Tahu's JSON (byte for byte what Java Tahu produces, plus Ignition's extra types, as an Ignition-aware Java host
+  decodes them) in a `VARIANT` column. Splitting it into metrics is left to SQL ([docs/UNITY_CATALOG_SCHEMAS.md](docs/UNITY_CATALOG_SCHEMAS.md) has sample queries).
 - **Sparkplug primary host application** (optional): ONLINE only while Databricks accepts the rows, so the
   edges buffer (store and forward) whenever they can't get there.
 - **Confirmed writes**: a batch leaves the connector only once Zerobus has acknowledged it; an optional

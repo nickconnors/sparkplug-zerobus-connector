@@ -1,0 +1,1 @@
+{"timestamp":1790696925611,"metrics":[{"name":"Alarms/HighTemp","timestamp":1790696925611,"dataType":"String","metaData":{"contentType":"Alarm","size":0,"seq":0,"fileName":"","fileType":"","md5":"","description":"","multiPart":false},"value":"{}"},{"name":"Motor/Run","timestamp":1790696925611,"dataType":"Boolean","value":true}],"seq":1}
