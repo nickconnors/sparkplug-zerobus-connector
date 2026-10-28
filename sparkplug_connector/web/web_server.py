@@ -8,11 +8,15 @@
 
 The web page (``static/ui/``) is plain HTML, Alpine.js (CSP build) and Pico CSS, served as files: no build step.
 Same origin only: a request that changes something from a page of another origin is refused (no CORS).
+Secrets (a source's MQTT password, the Zerobus client secret) come from environment variables only: the page sets
+``${env:NAME}`` and never sees or sends a secret's value.
 """
 
 import asyncio
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -41,6 +45,29 @@ logger = logging.getLogger(__name__)
 
 
 SECRET_KEY_PARTS = ('password', 'secret', 'token', 'private_key', 'api_key')
+ENV_REF = re.compile(r'^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$')
+
+
+def env_secret(value: Any, label: str) -> Optional[str]:
+    """A secret as the page may set it: ``${env:NAME}`` (its value comes from the connector's environment), or ''
+    (none). ValidationError for anything else: a secret's value is never sent to the connector or written to its file."""
+    if value is None or value == '':
+        return value
+    if isinstance(value, str) and ENV_REF.match(value.strip()):
+        return value.strip()
+    raise ValidationError(f"{label}: secrets come from environment variables: give the variable's name "
+                          "(saved as ${env:NAME}), and set it in the connector's environment")
+
+
+def env_reference(value: Any) -> Dict[str, Any]:
+    """How a secret is configured (for the page): the environment variable it reads and whether that is set, or
+    that the file holds something else (a value, or a ${credential:...} placeholder)."""
+    if value in (None, ''):
+        return {'env': None, 'set': False, 'other': False}
+    m = ENV_REF.match(str(value).strip())
+    if m:
+        return {'env': m.group(1), 'set': bool(os.environ.get(m.group(1))), 'other': False}
+    return {'env': None, 'set': True, 'other': True}
 
 UI_DIR = Path(__file__).parent / "static" / "ui"
 UI_PAGES = ("index", "sources", "edge-nodes", "zerobus", "settings", "certs")
@@ -250,7 +277,16 @@ class WebServer:
     async def get_sources(self, request: web.Request) -> web.Response:
         """Get configured data sources (passwords and secrets masked)."""
         sources = self.bridge.sources if self.bridge is not None else self.config.get('sources', [])
-        return web.json_response({'sources': _masked(sources)})
+        try:
+            in_file = {s.get('name'): s for s in (self._config_loader().load_raw().get('sources') or [])}
+        except Exception:  # noqa: BLE001 - no file (tests, a config passed in): nothing to show about the variables
+            in_file = {}
+        out = []
+        for source in _masked(sources):
+            ref = env_reference((in_file.get(source.get('name')) or {}).get('password'))
+            out.append({**source, 'password_env': ref['env'], 'password_env_set': ref['set'],
+                        'password_other': ref['other']})
+        return web.json_response({'sources': out})
 
     def _save_sources(self, change) -> None:
         """Applies ``change`` (sources -> sources) to the sources in the file the connector was started
@@ -263,23 +299,14 @@ class WebServer:
             raise RuntimeError(f"saving the configuration to {config_loader.config_path} failed")
 
     def _source_password(self, name: str, data: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
-        """A source's form data for the running bridge and for the file: a password typed on the page goes to the
-        credential store (``${credential:sources.<name>.password}`` in the file), a ``${env:...}`` placeholder stays
-        one in the file (its value for the bridge). ValidationError when the store can't take it."""
-        password = data.get('password')
-        if not isinstance(password, str) or not password:
+        """A source's form data for the running bridge and for the file: the password only as ``${env:NAME}`` (kept so
+        in the file, the variable's value for the bridge) or '' (removed). ValidationError for a password's value."""
+        if 'password' not in data:
             return data, data
-        from sparkplug_connector.core.config_loader import ConfigLoader
-        if password.startswith('${'):
-            loader = ConfigLoader(config_path=self.config_path)
-            resolved = loader._inject_credentials(loader._substitute_environment_variables(password))
-            return {**data, 'password': resolved}, data
-        from sparkplug_connector.core.credential_manager import CredentialManager
-        key = f"sources.{name}.password"
-        if not CredentialManager().update_credential(key, password):
-            raise ValidationError("The password can't be stored: the credential store needs CONNECTOR_MASTER_PASSWORD. "
-                                  "Or enter ${env:NAME} and set NAME in the connector's environment.")
-        return data, {**data, 'password': '${credential:' + key + '}'}
+        password = env_secret(data.get('password'), "Password")
+        if not password:
+            return {**data, 'password': password}, {**data, 'password': password}
+        return {**data, 'password': os.environ.get(ENV_REF.match(password).group(1), '')}, {**data, 'password': password}
 
     @require_permission(Permission.WRITE)
     async def add_source(self, request: web.Request) -> web.Response:
@@ -441,14 +468,20 @@ class WebServer:
         """Get ZeroBus configuration."""
         zerobus_config = self.config.get('zerobus', {})
 
-        # Don't expose sensitive credentials
+        # Don't expose sensitive credentials: the secret's environment variable, and whether it is set
         safe_config = {**zerobus_config}
         if 'auth' in safe_config:
             safe_config['auth'] = {
                 'client_id': safe_config['auth'].get('client_id', ''),
                 'client_secret': '***' if safe_config['auth'].get('client_secret') else ''
             }
-
+        try:
+            raw_auth = (self._config_loader().load_raw().get('zerobus') or {}).get('auth') or {}
+        except Exception:  # noqa: BLE001 - no file
+            raw_auth = {}
+        ref = env_reference(raw_auth.get('client_secret'))
+        safe_config.setdefault('auth', {}).update({'client_secret_env': ref['env'], 'client_secret_env_set': ref['set'],
+                                                   'client_secret_other': ref['other']})
         return web.json_response(safe_config)
 
 
@@ -628,40 +661,25 @@ class WebServer:
         """Update ZeroBus configuration."""
         try:
             data = await request.json()
+            if not isinstance(data, dict):
+                return web.json_response({'status': 'error', 'message': 'A JSON object is needed'}, status=400)
 
-            # Store credentials securely
-            from sparkplug_connector.core.credential_manager import CredentialManager
-            cred_manager = CredentialManager()
-
-            auth_in = (data.get('auth') or {}) if isinstance(data, dict) else {}
+            auth_in = data.get('auth') if isinstance(data.get('auth'), dict) else {}
             warning: str | None = None
-
-            client_id = (auth_in.get('client_id') or '').strip() if isinstance(auth_in, dict) else ''
-            client_secret = (auth_in.get('client_secret') or '').strip() if isinstance(auth_in, dict) else ''
-
-            stored_client_id = False
-            stored_client_secret = False
-
-            # client_id is not a secret, but we still prefer to store consistently.
-            if client_id:
-                stored_client_id = bool(cred_manager.update_credential('zerobus.client_id', client_id))
-                if not stored_client_id:
-                    # Fall back to saving client_id in config.yaml (safe)
-                    warning = warning or "Client ID could not be stored in the credential store; it will be saved in config.yaml."
-
-            # client_secret MUST NOT be written to config.yaml.
-            if client_secret:
-                stored_client_secret = bool(cred_manager.update_credential('zerobus.client_secret', client_secret))
-                if not stored_client_secret:
-                    warning = (
-                        "Client secret was NOT stored (missing CONNECTOR_MASTER_PASSWORD). "
-                        "Set CONNECTOR_MASTER_PASSWORD (recommended) or provide CONNECTOR_ZEROBUS_CLIENT_SECRET env var."
-                    )
+            client_id = str(auth_in.get('client_id') or '').strip()
+            # the secret only as ${env:NAME}: its value is never sent here or written to the file
+            try:
+                client_secret = env_secret(str(auth_in.get('client_secret') or '').strip(), "Client secret")
+            except ValidationError as e:
+                return web.json_response({'status': 'error', 'message': str(e)}, status=400)
+            if client_secret and not os.environ.get(ENV_REF.match(client_secret).group(1)):
+                warning = (f"{client_secret} is not set in the connector's environment: Zerobus can't sign in until it "
+                           "is (then restart the connector)")
 
             # Update config file (IMPORTANT: load raw to avoid persisting injected secrets): the file the
             # connector was started with, as written there (${env:...} placeholders stay placeholders)
             from sparkplug_connector.core.config_loader import ConfigLoader
-            config_loader = ConfigLoader(config_path=self.config_path, credential_manager=cred_manager)
+            config_loader = ConfigLoader(config_path=self.config_path)
             config_raw = config_loader.load_raw()
 
             existing = config_raw.get('zerobus', {}) or {}
@@ -672,10 +690,9 @@ class WebServer:
             auth_out = dict(existing_auth) if isinstance(existing_auth, dict) else {}
 
             if client_id:
-                auth_out['client_id'] = '${credential:zerobus.client_id}' if stored_client_id else client_id
-            # Always keep client_secret as placeholder if user attempted to set it.
+                auth_out['client_id'] = client_id
             if client_secret:
-                auth_out['client_secret'] = '${credential:zerobus.client_secret}'
+                auth_out['client_secret'] = client_secret
 
             merged['auth'] = auth_out
             config_raw['zerobus'] = merged

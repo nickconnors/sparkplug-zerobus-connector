@@ -51,14 +51,9 @@
             <input id="z-cid" x-model="form.client_id" placeholder="the service principal's application ID" spellcheck="false" autocomplete="off">
           </div>
           <div>
-            <label for="z-secret">Client secret</label>
-            <div class="secret">
-              <input id="z-secret" :type="secretType" x-model="form.client_secret" autocomplete="new-password" :placeholder="secretPlaceholder">
-              <button type="button" class="icon-btn" @click="toggleSecret" aria-label="Show or hide the secret">
-                <span x-show="!showSecret" data-icon="eye"></span><span x-show="showSecret" data-icon="eyeOff"></span>
-              </button>
-            </div>
-            <small class="muted">Kept in the credential store, never in the file.</small>
+            <label for="z-secret">Client secret variable</label>
+            <input id="z-secret" x-model="form.client_secret_env" placeholder="DATABRICKS_CLIENT_SECRET" autocomplete="off" spellcheck="false" :aria-invalid="invalid('client_secret_env')">
+            <small x-text="error('client_secret_env') || secretNote"></small>
           </div>
         </div>
         <label class="switch"><input type="checkbox" role="switch" x-model="form.enabled"> Start Zerobus with the connector</label>

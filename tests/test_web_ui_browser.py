@@ -76,6 +76,8 @@ async def test_a_source_is_added_through_the_dialog(tab):
     await t.fill("#s-name", "plant2")
     await t.fill("#s-endpoint", "mqtts://broker.example:8883")
     await t.fill("#s-user", "plant")
+    await t.fill("#s-pass", "PLANT2_MQTT_PASSWORD")
+    assert "Saved as ${env:PLANT2_MQTT_PASSWORD}" in await t.locator("#s-pass + small").inner_text()
     await t.fill("#s-phid", "databricks-zerobus")
     if os.environ.get("UI_SCREENSHOTS"):
         await t.screenshot(path=os.path.join(os.environ["UI_SCREENSHOTS"], "source-dialog.png"), full_page=True)
@@ -84,7 +86,7 @@ async def test_a_source_is_added_through_the_dialog(tab):
     s = saved(path)["plant2"]
     assert (s["endpoint"], s["username"], s["primary_host_id"], s["topics"]) == (
         "mqtts://broker.example:8883", "plant", "databricks-zerobus", ["spBv1.0/#"])
-    assert "password" not in s and t.errors == []
+    assert s["password"] == "${env:PLANT2_MQTT_PASSWORD}" and t.errors == []
     # the edit dialog shows what was saved
     row = t.locator("tr", has=t.locator("text=plant2"))
     await row.locator("button[aria-label='Edit source']").click()

@@ -1,19 +1,19 @@
-// Zerobus page: the connection form (/api/zerobus/config; the secret write-only: the API returns "***" when one is
-// stored, a blank field keeps it), start/stop, each open table's writer and write-ahead log (from /api/status's
-// metrics) and the checks (/api/zerobus/diagnostics).
+// Zerobus page: the connection form (/api/zerobus/config; the client secret comes from an environment variable: the
+// form sets its name, saved as ${env:NAME}, and shows whether it is set), start/stop, each open table's writer and
+// write-ahead log (from /api/status's metrics) and the checks (/api/zerobus/diagnostics).
 document.addEventListener('alpine:init', () => {
   'use strict';
   const Alpine = window.Alpine;
   const TABLE = /^[^.\s]+\.[^.\s]+\.[^.\s]+$/;
+  const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
   Alpine.data('zerobusPage', () => ({
     loading: true,
     saving: false,
     busy: null,
     checking: null,
-    form: { enabled: true, workspace_host: '', zerobus_endpoint: '', table: '', client_id: '', client_secret: '' },
-    secretSet: false,
-    showSecret: false,
+    form: { enabled: true, workspace_host: '', zerobus_endpoint: '', table: '', client_id: '', client_secret_env: '' },
+    auth: {},
     errors: {},
     formError: '',
     checkResult: null,
@@ -32,9 +32,9 @@ document.addEventListener('alpine:init', () => {
           zerobus_endpoint: String(cfg.zerobus_endpoint || ''),
           table: [t.catalog, t.schema, t.table].filter((p) => p).join('.'),
           client_id: String((cfg.auth || {}).client_id || ''),
-          client_secret: '',
+          client_secret_env: String((cfg.auth || {}).client_secret_env || ''),
         };
-        this.secretSet = (cfg.auth || {}).client_secret === '***';
+        this.auth = cfg.auth || {};
       } catch (e) {
         this.formError = e.message;
       } finally {
@@ -44,9 +44,17 @@ document.addEventListener('alpine:init', () => {
 
     can(permission) { return Alpine.store('connector').can(permission); },
     get running() { return !!(Alpine.store('connector').status || {}).zerobus_enabled; },
-    get secretType() { return this.showSecret ? 'text' : 'password'; },
-    get secretPlaceholder() { return this.secretSet ? '•••••••• (stored; leave blank to keep)' : ''; },
-    toggleSecret() { this.showSecret = !this.showSecret; },
+    get secretNote() {
+      const name = this.form.client_secret_env.trim();
+      if (!name) {
+        return this.auth.client_secret_other ? 'The file has a secret of its own: give a variable to replace it.'
+          : 'The environment variable the connector reads the secret from.';
+      }
+      if (name === this.auth.client_secret_env) {
+        return name + (this.auth.client_secret_env_set ? ' is set' : ' is not set') + ' in the connector\'s environment.';
+      }
+      return 'Saved as ${env:' + name + '}; set ' + name + ' in the connector\'s environment, then restart it.';
+    },
     invalid(field) { return this.errors[field] ? 'true' : null; },
     error(field) { return this.errors[field] || ''; },
 
@@ -56,6 +64,7 @@ document.addEventListener('alpine:init', () => {
       if (!/^https:\/\/\S+$/.test(f.workspace_host.trim())) errors.workspace_host = 'https://<workspace>.cloud.databricks.com';
       if (!f.zerobus_endpoint.trim()) errors.zerobus_endpoint = 'Required';
       if (!TABLE.test(f.table.trim())) errors.table = 'catalog.schema.table';
+      if (f.client_secret_env.trim() && !ENV_NAME.test(f.client_secret_env.trim())) errors.client_secret_env = 'A variable name: letters, digits and _';
       this.errors = errors;
       return Object.keys(errors).length === 0;
     },
@@ -72,7 +81,8 @@ document.addEventListener('alpine:init', () => {
         default_target: { workspace_host: f.workspace_host.trim(), catalog, schema, table },
         auth: { client_id: f.client_id.trim() },
       };
-      if (f.client_secret.trim()) body.auth.client_secret = f.client_secret.trim();
+      const env = f.client_secret_env.trim();
+      if (env && env !== this.auth.client_secret_env) body.auth.client_secret = '${env:' + env + '}';
       this.saving = true;
       try {
         const r = await window.api.post('/api/zerobus/config', body);

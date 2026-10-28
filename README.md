@@ -180,8 +180,9 @@ py -3.12 -m venv .venv
   read from this directory.
 
 A save goes to the file the connector was started with (`--config`): fields the page doesn't show stay as written
-there, `${env:...}` placeholders included; the API never returns passwords or secrets. An MQTT password typed on the
-page goes to the credential store (`CONNECTOR_MASTER_PASSWORD`), never into the file, or type `${env:NAME}`.
+there, `${env:...}` placeholders included; the API never returns passwords or secrets. Secrets come from environment
+variables only: the page's MQTT password and Zerobus client secret fields take a variable's **name** (saved as
+`${env:NAME}`) and show whether it is set in the connector's environment; a secret's value is refused.
 
 The pages are plain HTML with [Alpine.js](https://alpinejs.dev) (CSP build) and [Pico CSS](https://picocss.com),
 served from `sparkplug_connector/web/static/ui/` (versions and checksums: `vendor/VERSIONS.md`): no Node, no build
@@ -217,13 +218,12 @@ with `require_client_cert: true`).
 
 ## Credentials
 
-- **Environment** (the way for containers): `${env:NAME}` in the file. The encrypted store below lives in the
-  container's home directory, so a secret saved on the web page is gone when the container is recreated
-  (and isn't stored at all without `CONNECTOR_MASTER_PASSWORD`).
-- **Encrypted store**: `${credential:zerobus.client_secret}` in the file reads `~/.sparkplug_connector/credentials.enc`
-  (Fernet, key from `CONNECTOR_MASTER_PASSWORD`); the web page's ZeroBus form stores a new client secret
-  there and writes only the placeholder. `CONNECTOR_ZEROBUS_CLIENT_ID` / `CONNECTOR_ZEROBUS_CLIENT_SECRET`
-  override the store.
+- **Environment** (the way the web page sets them): `${env:NAME}` in the file, the value in the connector's
+  environment (Docker: `--env-file connector.env`). The page sets the variable's name, never a value.
+- **Encrypted store** (set up by hand only): `${credential:zerobus.client_secret}` in the file reads
+  `~/.sparkplug_connector/credentials.enc` (Fernet, key from `CONNECTOR_MASTER_PASSWORD`;
+  `python -m sparkplug_connector.core.credential_manager store ...`). `CONNECTOR_ZEROBUS_CLIENT_ID` /
+  `CONNECTOR_ZEROBUS_CLIENT_SECRET` override it.
 - **Encrypted values in the file**: `python scripts/encrypt_config.py` (same master password).
 
 ## Layout

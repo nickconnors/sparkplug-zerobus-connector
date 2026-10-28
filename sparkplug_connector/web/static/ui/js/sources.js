@@ -1,6 +1,7 @@
-// Sources page: paged table with start/stop, add/edit dialog and delete confirmation, on /api/sources. The password is
-// write-only: the API only says whether one is stored, a blank field keeps it and "Clear" removes it. An edit sends
-// every field of the dialog; a blank one goes back to its default, fields the dialog doesn't show are kept.
+// Sources page: paged table with start/stop, add/edit dialog and delete confirmation, on /api/sources. The password
+// comes from an environment variable: the dialog sets its name (saved as ${env:NAME}) and shows whether it is set in
+// the connector's environment; a password's value is never typed here. An edit sends every field of the dialog; a
+// blank one goes back to its default, fields the dialog doesn't show are kept.
 document.addEventListener('alpine:init', () => {
   'use strict';
   const Alpine = window.Alpine;
@@ -8,13 +9,15 @@ document.addEventListener('alpine:init', () => {
 
   function blank() {
     return {
-      name: '', endpoint: '', username: '', password: '', client_id: '', keepalive: '', topics: ['spBv1.0/#'],
+      name: '', endpoint: '', username: '', password_env: '', client_id: '', keepalive: '', topics: ['spBv1.0/#'],
       target_table: '', ca_cert_path: '', client_cert_path: '', client_key_path: '', check_hostname: true,
       primary_host_id: '', state_format: 'v3', offline_after_seconds: '', online_after_seconds: '',
       sequence_handling: 'strict', sequence_reordering_timeout: '', block_auto_rebirth: false,
       nbirth_enabled: false, warehouse_id: '', procedures: '', schema_prefix: '', check_views: true, enabled: true,
     };
   }
+
+  const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
   function text(v) { return v === undefined || v === null ? '' : String(v); }
   function flag(v, dflt) {
@@ -34,9 +37,7 @@ document.addEventListener('alpine:init', () => {
     errors: {},
     formError: '',
     saving: false,
-    showPassword: false,
-    passwordSet: false,
-    clearPassword: false,
+    original: null,
     toDelete: null,
 
     async init() {
@@ -108,8 +109,18 @@ document.addEventListener('alpine:init', () => {
     // --- dialog ---
 
     get title() { return this.editing ? 'Edit ' + this.editing : 'Add source'; },
-    get passwordType() { return this.showPassword ? 'text' : 'password'; },
-    get passwordPlaceholder() { return this.passwordSet && !this.clearPassword ? '•••••••• (stored; leave blank to keep)' : ''; },
+    get passwordNote() {
+      const o = this.original || {};
+      const name = this.form.password_env.trim();
+      if (!name) {
+        return o.password_other ? 'The file has a password of its own: give a variable to replace it.'
+          : 'The environment variable the connector reads the password from (none: no password).';
+      }
+      if (name === o.password_env) {
+        return o.password_env_set ? name + ' is set in the connector\'s environment.' : name + ' is not set in the connector\'s environment.';
+      }
+      return 'Saved as ${env:' + name + '}; set ' + name + ' in the connector\'s environment.';
+    },
     get clientIdPlaceholder() { return 'dbx-' + (this.form.name || '<name>'); },
     get tlsHint() { return /^mqtts:/.test(this.form.endpoint) ? '' : 'For mqtts:// endpoints.'; },
     certOptions(current) {
@@ -118,15 +129,12 @@ document.addEventListener('alpine:init', () => {
     certLabel(name) { return this.certs.includes(name) ? name : name + ' (not in the store)'; },
     invalid(field) { return this.errors[field] ? 'true' : null; },
     error(field) { return this.errors[field] || ''; },
-    toggleShowPassword() { this.showPassword = !this.showPassword; },
     addTopic() { this.form.topics.push(''); },
     removeTopic(index) { this.form.topics.splice(index, 1); },
 
     openDialog() {
       this.errors = {};
       this.formError = '';
-      this.showPassword = false;
-      this.clearPassword = false;
       this.$refs.dialog.showModal();
       this.$nextTick(() => (this.editing ? null : this.$refs.name.focus()));
     },
@@ -134,7 +142,7 @@ document.addEventListener('alpine:init', () => {
     add() {
       this.form = blank();
       this.editing = null;
-      this.passwordSet = false;
+      this.original = null;
       this.hadNbirth = false;
       this.hadSecurity = false;
       this.openDialog();
@@ -142,6 +150,7 @@ document.addEventListener('alpine:init', () => {
 
     edit(source) {
       const f = blank();
+      f.password_env = text(source.password_env);
       ['name', 'endpoint', 'username', 'client_id', 'keepalive', 'target_table', 'primary_host_id',
         'offline_after_seconds', 'online_after_seconds', 'sequence_reordering_timeout']
         .forEach((k) => { f[k] = text(source[k]); });
@@ -165,7 +174,7 @@ document.addEventListener('alpine:init', () => {
       }
       this.form = f;
       this.editing = source.name;
-      this.passwordSet = !!source.password;
+      this.original = source;
       this.hadNbirth = !!nb;
       this.hadSecurity = !!source.security;
       this.openDialog();
@@ -188,8 +197,10 @@ document.addEventListener('alpine:init', () => {
       if (!this.editing) {
         Object.keys(body).forEach((k) => { if (body[k] === '') delete body[k]; });
       }
-      if (f.password) body.password = f.password;
-      else if (this.clearPassword) body.password = '';
+      const env = f.password_env.trim();
+      const before = this.original ? text(this.original.password_env) : '';
+      if (env && env !== before) body.password = '${env:' + env + '}';
+      else if (!env && before) body.password = '';            // the variable removed: no password
       const tls = { ca_cert_path: f.ca_cert_path, client_cert_path: f.client_cert_path, client_key_path: f.client_key_path,
         check_hostname: f.check_hostname };
       if (this.hadSecurity || f.ca_cert_path || f.client_cert_path || f.client_key_path || !f.check_hostname) {
@@ -212,6 +223,7 @@ document.addEventListener('alpine:init', () => {
       if (!f.endpoint.trim()) errors.endpoint = 'Required';
       else if (!/^mqtts?:\/\/[^\s/]+(:\d{1,5})?\/?$/.test(f.endpoint.trim())) errors.endpoint = 'mqtt://host:1883 or mqtts://host:8883';
       if (!f.topics.some((t) => t.trim())) errors.topics = 'At least one topic filter';
+      if (f.password_env.trim() && !ENV_NAME.test(f.password_env.trim())) errors.password_env = 'A variable name: letters, digits and _';
       if (f.keepalive !== '' && !(Number(f.keepalive) >= 1 && Number(f.keepalive) <= 65535)) errors.keepalive = '1 to 65535';
       if (f.target_table.trim() && f.target_table.trim().split('.').length !== 3) errors.target_table = 'catalog.schema.table';
       if (f.client_cert_path && !f.client_key_path) errors.client_key_path = 'Required with a client certificate';

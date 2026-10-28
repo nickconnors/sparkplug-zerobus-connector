@@ -193,19 +193,33 @@ async def test_the_dialogs_connection_fields_are_checked(page, edit, message):
     assert path.read_text() == before
 
 
-async def test_a_typed_password_goes_to_the_credential_store_never_into_the_file(page, monkeypatch):
-    http, path, bridge = page
-    monkeypatch.delenv("CONNECTOR_MASTER_PASSWORD", raising=False)
-    async with http.put("/api/sources/sp", json={**SP, "password": "typed-secret"}) as r:
-        assert r.status == 400 and "CONNECTOR_MASTER_PASSWORD" in (await r.json())["message"]
-    assert "typed-secret" not in path.read_text()
-    monkeypatch.setenv("CONNECTOR_MASTER_PASSWORD", "master-for-the-test")
-    async with http.put("/api/sources/sp", json={**SP, "password": "typed-secret"}) as r:
-        assert r.status == 200, await r.text()
-    assert saved(path)["sp"]["password"] == "${credential:sources.sp.password}" and "typed-secret" not in path.read_text()
-    assert running(bridge, "sp")["password"] == "typed-secret"
+@pytest.mark.parametrize("password", ["typed-secret", "${credential:sources.sp.password}", "${env:BAD-NAME}",
+                                      "${env:X:default}"])
+async def test_a_password_comes_only_from_an_environment_variable(page, password):
+    http, path, _ = page
+    before = path.read_text()
+    async with http.put("/api/sources/sp", json={**SP, "password": password}) as r:
+        assert r.status == 400 and "environment variables" in (await r.json())["message"]
+    assert path.read_text() == before
+
+
+async def test_the_page_sees_the_passwords_variable_and_whether_it_is_set(page, monkeypatch):
+    http, _, _ = page
     async with http.get("/api/sources") as r:
-        assert "typed-secret" not in await r.text()
+        sp = next(s for s in (await r.json())["sources"] if s["name"] == "sp")
+    assert (sp["password_env"], sp["password_env_set"], sp["password_other"]) == ("SPTEST_PASSWORD", True, False)
+    assert "s3cret" not in str(sp)
+    monkeypatch.delenv("SPTEST_PASSWORD")
+    async with http.get("/api/sources") as r:
+        sp = next(s for s in (await r.json())["sources"] if s["name"] == "sp")
+    assert (sp["password_env"], sp["password_env_set"]) == ("SPTEST_PASSWORD", False)
+
+
+async def test_removing_the_variable_removes_the_password(page):
+    http, path, bridge = page
+    async with http.put("/api/sources/sp", json={**SP, "password": ""}) as r:
+        assert r.status == 200
+    assert "password" not in saved(path)["sp"] and not running(bridge, "sp").get("password")
 
 
 async def test_a_typed_env_placeholder_stays_one_in_the_file(page, monkeypatch):

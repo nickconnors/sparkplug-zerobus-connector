@@ -378,27 +378,34 @@ async def test_add_and_edit_errors_are_reported_and_nothing_is_saved(page, start
     assert path.read_text() == before
 
 
-@pytest.mark.parametrize("master_password", ["", "a-master-password"])
-async def test_saving_zerobus_credentials_never_writes_the_secret_to_the_file(page, started, monkeypatch, master_password):
+@pytest.mark.parametrize("secret", ["new-secret", "${credential:zerobus.client_secret}", "${env:not a name}"])
+async def test_a_zerobus_secret_value_is_refused(page, started, secret):
+    http, path, _ = page
+    before = path.read_text()
+    async with http.post("/api/zerobus/config", json={"auth": {"client_id": "new-id", "client_secret": secret}}) as r:
+        assert r.status == 400 and "environment variables" in (await r.json())["message"]
+    assert path.read_text() == before
+
+
+@pytest.mark.parametrize("is_set", [True, False])
+async def test_the_zerobus_secret_comes_from_an_environment_variable(page, started, monkeypatch, is_set):
     http, path, bridge = page
-    if master_password:
-        monkeypatch.setenv("CONNECTOR_MASTER_PASSWORD", master_password)
+    if is_set:
+        monkeypatch.setenv("SPTEST_ZEROBUS_SECRET", "from-env")
     else:
-        monkeypatch.delenv("CONNECTOR_MASTER_PASSWORD", raising=False)
-    async with http.post("/api/zerobus/config", json={"auth": {"client_id": "new-id", "client_secret": "new-secret"}}) as r:
+        monkeypatch.delenv("SPTEST_ZEROBUS_SECRET", raising=False)
+    async with http.post("/api/zerobus/config", json={"auth": {"client_id": "new-id",
+                                                                "client_secret": "${env:SPTEST_ZEROBUS_SECRET}"}}) as r:
         assert r.status == 200, await r.text()
         body = await r.json()
-    text = path.read_text()
-    auth = yaml.safe_load(text)["zerobus"]["auth"]
-    assert "new-secret" not in text and auth["client_secret"] == "${credential:zerobus.client_secret}"
-    if master_password:                                     # both in the encrypted credential store
-        assert "warning" not in body and auth["client_id"] == "${credential:zerobus.client_id}"
-        assert bridge.zerobus_config["auth"] == {"client_id": "new-id", "client_secret": "new-secret"}
-    else:                                                   # no store: the id in the file, the secret nowhere
-        assert "NOT stored" in body["warning"] and auth["client_id"] == "new-id"
+    auth = yaml.safe_load(path.read_text())["zerobus"]["auth"]
+    assert auth == {"client_id": "new-id", "client_secret": "${env:SPTEST_ZEROBUS_SECRET}"}     # in the file as written
+    assert bridge.zerobus_config["auth"]["client_secret"] == ("from-env" if is_set else "")
+    assert ("warning" in body) is not is_set
     async with http.get("/api/zerobus/config") as r:
         shown = (await r.json())["auth"]
-    assert "new-secret" not in str(shown)
+    assert (shown["client_secret_env"], shown["client_secret_env_set"]) == ("SPTEST_ZEROBUS_SECRET", is_set)
+    assert "from-env" not in str(shown)
 
 
 @pytest.mark.parametrize("endpoint", ["https://localhost", "localhost"])
