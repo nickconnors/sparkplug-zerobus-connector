@@ -281,16 +281,18 @@ so nothing is marked STALE here: that shows in the tables downstream.
 
 ## Web page
 
-The connector's web UI (the [repository README](../../README.md#web-ui)) lists the sources with their state
-(`yes · ONLINE`) and primary host, and adds, edits and deletes them (asking before a delete): endpoint,
-target table, client id, primary host id, STATE format, offline/online seconds, the NBIRTH settings
-(switch, SQL warehouse, schema prefix, the procedure), Rows (`sequence_handling`), Reordering timeout and
-Block auto rebirth; a running source's dropped messages show next to its state. The username, password, topics and TLS settings stay
-in the configuration file. A save restarts the source and writes the file the connector was started with
-(`--config`): fields the form doesn't show and unchanged fields stay as written there, `${env:...}`
-placeholders included; `GET /api/sources` masks passwords and secrets. **Edge nodes** lists each running
-source's edge nodes and devices (`GET /api/sparkplug/edge-nodes`, under *Health*) with a **Request rebirth**
-button per edge node.
+The connector's web page (the [repository README](../../README.md#web-ui)): **Sources** lists the sources with
+their state and role (primary host or plain subscriber), starts and stops them, and adds, edits and deletes them
+(asking before a delete): endpoint, username and password, client id, keep-alive, topics, target table, TLS files
+(CA, client certificate and key, from the **Certificates** page, and hostname checking), primary host id, STATE format,
+offline/online seconds, Rows (`sequence_handling`), Reordering timeout, Block auto rebirth, and the NBIRTH call
+(switch, SQL warehouse, procedures, schema prefix, the views check). A save restarts the source and writes the file
+the connector was started with (`--config`): fields the dialog doesn't show and unchanged fields stay as written
+there, `${env:...}` placeholders included; a typed password goes to the credential store
+(`${credential:sources.<name>.password}` in the file); `GET /api/sources` masks passwords and secrets. **Edge
+nodes** lists each running source's edge nodes and devices (`GET /api/sparkplug/edge-nodes`, under *Health*) with a
+**Request rebirth** button per edge node; **Status** shows each source's health. The diagnostics' settings are on
+**Settings**.
 
 ## Limitations
 

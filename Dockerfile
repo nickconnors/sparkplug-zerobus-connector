@@ -1,5 +1,5 @@
-# The connector: Sparkplug B (MQTT) to Databricks through Zerobus. Python only: build the React web UI in
-# webui/ first to include it (npm ci && npm run build); protobuf runs its fast upb implementation.
+# The connector: Sparkplug B (MQTT) to Databricks through Zerobus. Python only (the web page has no build step);
+# protobuf runs its fast upb implementation.
 #
 #   docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
 #   docker run -d --stop-timeout 30 --env-file connector.env -p 127.0.0.1:8001:8001 \

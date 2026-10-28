@@ -9,3 +9,5 @@ JPype1>=1.5
 hypothesis>=6.100
 # databricks-sdk: the live test (test_live_zerobus.py) reads the table back through a SQL warehouse
 databricks-sdk>=0.20.0
+# playwright: the web page in a headless Chromium (test_web_ui_browser.py; then: python -m playwright install chromium)
+playwright==1.58.0

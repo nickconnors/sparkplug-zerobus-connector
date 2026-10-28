@@ -9,5 +9,4 @@ __pycache__
 .pytest_cache
 tests
 wal
-webui/node_modules
 .env

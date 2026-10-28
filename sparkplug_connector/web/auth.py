@@ -339,7 +339,7 @@ async def auth_middleware(request: web.Request, handler):
         return await handler(request)
 
     # Public endpoints (no authentication required)
-    public_paths = ['/login', '/login/callback', '/health', '/static']
+    public_paths = ['/login', '/login/callback', '/health', '/static', '/css/', '/js/', '/vendor/', '/img/']   # + the pages' files
     if any(request.path.startswith(path) for path in public_paths):
         return await handler(request)
 

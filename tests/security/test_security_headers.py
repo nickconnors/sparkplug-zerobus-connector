@@ -47,7 +47,8 @@ class TestSecurityHeaders:
         assert 'Content-Security-Policy' in resp.headers
         csp = resp.headers['Content-Security-Policy']
         assert "default-src 'self'" in csp
-        assert "script-src 'self' 'unsafe-inline'" in csp
+        assert "script-src 'self';" in csp and "style-src 'self';" in csp     # no inline script or style, no eval
+        assert "unsafe" not in csp
         assert "frame-ancestors 'none'" in csp
 
     async def test_x_frame_options(self, client):

@@ -25,6 +25,7 @@ from sparkplug_connector.core.backpressure import BackpressureManager
 from sparkplug_connector.core.confirmed_writer import ConfirmedWriter, ZerobusRowStreams, convert_rows, take_from_backpressure
 from sparkplug_connector.core.wal import SEQ_FIELD, WriteAheadLog
 from sparkplug_connector.core import __version__
+from sparkplug_connector.core.cert_store import certs_dir, resolve_tls_paths
 from sparkplug_connector.core import targets as source_tables
 from sparkplug_connector.sparkplug import raw_row
 from sparkplug_connector.sparkplug.diagnostics import REFRESH_S, Diagnostics, Tracker
@@ -392,7 +393,7 @@ class Bridge:
             protocol_type=source_config.get('protocol', 'sparkplug'),
             source_name=source_name,
             endpoint=source_config['endpoint'],
-            config=source_config,
+            config=resolve_tls_paths(source_config, certs_dir(self.config)),   # uploaded files by bare name
             on_record=lambda record: self._on_record(record, source_name),
             on_stats=self._on_stats
         )

@@ -2,8 +2,12 @@
 
 - Sparkplug B sources: add, edit, remove, start, stop
 - ZeroBus target configuration and diagnostics
-- Status, metrics and the Sparkplug health
+- Status, metrics and the Sparkplug health; the edge nodes and rebirth requests
+- Settings (the connector-wide ones) and the uploaded certificates
 - Optional login (OAuth2) with role-based permissions
+
+The web page (``static/ui/``) is plain HTML, Alpine.js (CSP build) and Pico CSS, served as files: no build step.
+Same origin only: a request that changes something from a page of another origin is refused (no CORS).
 """
 
 import asyncio
@@ -12,9 +16,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from urllib.parse import urlsplit
+
 from aiohttp import web
-import aiohttp_cors
 from typing import Callable
+
+from sparkplug_connector.core.cert_store import CertError, CertStore, MAX_SIZE, certs_dir, used_by
+from sparkplug_connector.web import settings_schema
 
 # Authentication and authorization (off by default)
 from sparkplug_connector.web.auth import AuthenticationManager, auth_middleware
@@ -34,16 +42,26 @@ logger = logging.getLogger(__name__)
 
 SECRET_KEY_PARTS = ('password', 'secret', 'token', 'private_key', 'api_key')
 
-NO_UI_HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Sparkplug Zerobus connector</title></head>
-<body style="font-family: sans-serif; margin: 2em">
-<h1>Sparkplug Zerobus connector</h1>
-<p>The web UI isn't built into this copy: run <code>npm ci &amp;&amp; npm run build</code> in <code>webui/</code>
-(it builds into <code>sparkplug_connector/web/static/connector-ui/</code>), then restart the connector.</p>
-<p>The API works without it: <a href="/health">/health</a>, <a href="/api/status">/api/status</a>,
-<a href="/api/sparkplug/health">/api/sparkplug/health</a>.</p>
-</body></html>
-"""
+UI_DIR = Path(__file__).parent / "static" / "ui"
+UI_PAGES = ("index", "sources", "edge-nodes", "zerobus", "settings", "certs")
+UI_ASSETS = ("css", "js", "vendor", "img")
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+@web.middleware
+async def same_origin_middleware(request: web.Request, handler):
+    """A request that changes something must come from the connector's own pages: one a browser sends from a page of
+    another origin (``Origin`` another host, or ``Sec-Fetch-Site: cross-site``) is refused. Clients that send
+    neither (curl, scripts) pass; the login, when on, still applies to them."""
+    if request.method not in SAFE_METHODS:
+        origin = request.headers.get('Origin')
+        hosts = {request.host, request.headers.get('X-Forwarded-Host', '')} - {''}
+        cross = request.headers.get('Sec-Fetch-Site') == 'cross-site'
+        if origin is not None and (origin == 'null' or urlsplit(origin).netloc not in hosts):
+            cross = True
+        if cross:
+            return web.json_response({'status': 'error', 'message': 'Refused: a request from another site'}, status=403)
+    return await handler(request)
 
 
 def _masked(value: Any) -> Any:
@@ -106,10 +124,11 @@ class WebServer:
         self.auth_manager = None
         self.security_logger = get_structured_logger()
         self.ssl_context = None
+        self.restart_required = False       # settings saved that apply at the next start
 
     async def start(self):
         """Start web server."""
-        self.app = web.Application()
+        self.app = web.Application(client_max_size=MAX_SIZE + 64 * 1024)    # a certificate upload and its multipart
 
         static_dir = Path(__file__).parent / "static"
 
@@ -117,8 +136,9 @@ class WebServer:
         self.app.middlewares.append(correlation_id_middleware)
         logger.info("✓ Correlation ID tracking enabled")
 
-        # Security headers (logged after the TLS setup)
+        # Security headers (logged after the TLS setup); same origin only for changes
         self.app.middlewares.append(security_headers_middleware)
+        self.app.middlewares.append(same_origin_middleware)
 
         # Login (web_ui.authentication)
         auth_config = self.config.get('web_ui', {}).get('authentication', {})
@@ -130,16 +150,6 @@ class WebServer:
             logger.info("✓ Authentication enabled")
         else:
             logger.warning("⚠️  Authentication disabled: anyone who reaches the web UI can change the configuration")
-
-        # Setup CORS
-        cors = aiohttp_cors.setup(self.app, defaults={
-            "*": aiohttp_cors.ResourceOptions(
-                allow_credentials=True,
-                expose_headers="*",
-                allow_headers="*",
-                allow_methods="*"
-            )
-        })
 
         # API Routes
         routes = [
@@ -177,18 +187,28 @@ class WebServer:
             web.get('/api/sparkplug/edge-nodes', self.get_sparkplug_edge_nodes),
             web.get('/api/status', self.get_status),
 
+            # Settings and certificates
+            web.get('/api/settings', self.get_settings),
+            web.put('/api/settings', self.update_settings),
+            web.get('/api/certs', self.get_certs),
+            web.post('/api/certs', self.upload_cert),
+            web.delete('/api/certs/{name}', self.delete_cert),
+
             # Health
             web.get('/health', self.health_check),
 
-            # Web UI
-            web.get('/', self.serve_index),
+            # Web UI: the pages, then their files
+            web.get('/', self.serve_page),
+            web.get('/{page}.html', self.serve_page),
         ]
 
         for route in routes:
-            resource = self.app.router.add_route(route.method, route.path, route.handler)
-            cors.add(resource)
+            self.app.router.add_route(route.method, route.path, route.handler)
 
-        # Static assets for Web UI
+        for folder in UI_ASSETS:
+            if (UI_DIR / folder).is_dir():
+                self.app.router.add_static(f'/{folder}/', path=str(UI_DIR / folder))
+        # the login page
         if static_dir.exists():
             self.app.router.add_static('/static/', path=str(static_dir), name='static')
 
@@ -242,6 +262,25 @@ class WebServer:
         if not config_loader.save(config):
             raise RuntimeError(f"saving the configuration to {config_loader.config_path} failed")
 
+    def _source_password(self, name: str, data: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """A source's form data for the running bridge and for the file: a password typed on the page goes to the
+        credential store (``${credential:sources.<name>.password}`` in the file), a ``${env:...}`` placeholder stays
+        one in the file (its value for the bridge). ValidationError when the store can't take it."""
+        password = data.get('password')
+        if not isinstance(password, str) or not password:
+            return data, data
+        from sparkplug_connector.core.config_loader import ConfigLoader
+        if password.startswith('${'):
+            loader = ConfigLoader(config_path=self.config_path)
+            resolved = loader._inject_credentials(loader._substitute_environment_variables(password))
+            return {**data, 'password': resolved}, data
+        from sparkplug_connector.core.credential_manager import CredentialManager
+        key = f"sources.{name}.password"
+        if not CredentialManager().update_credential(key, password):
+            raise ValidationError("The password can't be stored: the credential store needs CONNECTOR_MASTER_PASSWORD. "
+                                  "Or enter ${env:NAME} and set NAME in the connector's environment.")
+        return data, {**data, 'password': '${credential:' + key + '}'}
+
     @require_permission(Permission.WRITE)
     async def add_source(self, request: web.Request) -> web.Response:
         """Add new data source."""
@@ -267,15 +306,20 @@ class WebServer:
                     status=400
                 )
 
+            try:
+                running, saved = self._source_password(data['name'], data)
+            except ValidationError as e:
+                return web.json_response({'status': 'error', 'message': str(e)}, status=400)
+
             # Add to bridge
             await self.bridge.add_source(
                 source_name=data['name'],
                 source_type=data['protocol'],
-                source_config=data
+                source_config=running
             )
 
             # Update config file
-            self._save_sources(lambda sources: sources + [data])
+            self._save_sources(lambda sources: sources + [saved])
 
             return web.json_response({'status': 'ok', 'message': f"Source '{data['name']}' added"})
 
@@ -331,11 +375,15 @@ class WebServer:
             current = next((s for s in self.bridge.sources if s.get('name') == source_name), None)
             if current is None:
                 return web.json_response({'status': 'error', 'message': f"Source not found: {source_name}"}, status=404)
-            await self.bridge.update_source(source_name, _edited(current, current, data))
+            try:
+                running, saved = self._source_password(source_name, data)
+            except ValidationError as e:
+                return web.json_response({'status': 'error', 'message': str(e)}, status=400)
+            await self.bridge.update_source(source_name, _edited(current, current, running))
 
             # Update config file (unchanged fields keep the file's spelling, e.g. a ${env:...} placeholder)
             self._save_sources(lambda sources: [
-                _edited(s, current, data) if s.get('name') == source_name else s for s in sources])
+                _edited(s, current, saved) if s.get('name') == source_name else s for s in sources])
 
             return web.json_response({'status': 'ok', 'message': f"Source '{source_name}' updated"})
 
@@ -737,7 +785,9 @@ class WebServer:
         """Get connector status."""
         try:
             status = self.bridge.get_status()
-
+            status['restart_required'] = self.restart_required      # settings saved that apply at the next start
+            status['sources'] = [{'name': src.get('name'), 'enabled': bool(src.get('enabled', True)),
+                                  'running': src.get('name') in self.bridge.clients} for src in self.bridge.sources]
             return web.json_response(status)
         except Exception as e:
             logger.error(f"Failed to get status: {e}", exc_info=True)
@@ -755,16 +805,89 @@ class WebServer:
                 return web.HTTPFound('/static/login.html')
         return None
 
-    async def serve_index(self, request: web.Request) -> web.Response:
-        """The React UI at / (a note on how to build it if the build is missing; the API works either way)."""
+    async def serve_page(self, request: web.Request) -> web.StreamResponse:
+        """A page of the web UI (``/`` is ``index.html``); behind the login when it is on."""
+        page = request.match_info.get('page', 'index')
+        if page not in UI_PAGES:
+            raise web.HTTPNotFound()
         gated = await self._auth_gate(request)
         if gated:
             return gated
+        return web.FileResponse(path=UI_DIR / f"{page}.html", headers={'Cache-Control': 'no-cache'})
 
-        index_file = Path(__file__).parent / "static" / "connector-ui" / "index.html"
-        if index_file.exists():
-            return web.FileResponse(path=index_file)
-        return web.Response(text=NO_UI_HTML, content_type='text/html')
+    # Settings and certificates
+
+    def _config_loader(self):
+        from sparkplug_connector.core.config_loader import ConfigLoader
+        return ConfigLoader(config_path=self.config_path)
+
+    def _settings_response(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        loader = self._config_loader()
+        return {**settings_schema.schema(), 'values': settings_schema.values(raw), 'file': str(loader.config_path),
+                'restartRequired': self.restart_required}
+
+    @require_permission(Permission.READ)
+    async def get_settings(self, request: web.Request) -> web.Response:
+        """The connector-wide settings (settings_schema): their schema and the file's values."""
+        return web.json_response(self._settings_response(self._config_loader().load_raw()))
+
+    @require_permission(Permission.CONFIGURE)
+    async def update_settings(self, request: web.Request) -> web.Response:
+        """``{"values": {key: value}}``: saved to the file (blank: back to the default); applied at the next start."""
+        try:
+            data = await request.json()
+        except Exception:  # noqa: BLE001 - not JSON
+            return web.json_response({'status': 'error', 'message': 'A JSON body is needed'}, status=400)
+        changes = data.get('values') if isinstance(data, dict) else None
+        if not isinstance(changes, dict):
+            return web.json_response({'status': 'error', 'message': 'values: an object of settings'}, status=400)
+        loader = self._config_loader()
+        raw, errors = settings_schema.apply(loader.load_raw(), changes)
+        if errors:
+            return web.json_response({'status': 'error', 'message': 'Some settings are not valid', 'errors': errors},
+                                     status=400)
+        if not loader.save(raw):
+            return web.json_response({'status': 'error', 'message': f'Saving {loader.config_path} failed'}, status=500)
+        if changes:
+            self.restart_required = True
+        return web.json_response(self._settings_response(raw))
+
+    def _cert_store(self) -> CertStore:
+        return CertStore(certs_dir(self.config))
+
+    @require_permission(Permission.READ)
+    async def get_certs(self, request: web.Request) -> web.Response:
+        store = self._cert_store()
+        sources = self.bridge.sources if self.bridge is not None else self.config.get('sources', [])
+        files = [{'name': f.name, 'size': f.size, 'modified': f.modified, 'usedBy': used_by(sources, f.name)}
+                 for f in store.list()]
+        return web.json_response({'files': files, 'maxSize': MAX_SIZE, 'directory': str(store.dir)})
+
+    @require_permission(Permission.CONFIGURE)
+    async def upload_cert(self, request: web.Request) -> web.Response:
+        """A multipart upload (field ``file``; ``overwrite=true`` replaces a file of that name)."""
+        try:
+            reader = await request.multipart()
+        except Exception:  # noqa: BLE001 - not multipart
+            return web.json_response({'status': 'error', 'message': 'A multipart upload is needed'}, status=400)
+        overwrite = request.query.get('overwrite') == 'true'
+        async for part in reader:
+            if part.name != 'file':
+                continue
+            content = await part.read(decode=False)
+            try:
+                saved = self._cert_store().save(part.filename or '', bytes(content), overwrite)
+            except CertError as e:
+                return web.json_response({'status': 'error', 'message': str(e)}, status=e.status)
+            return web.json_response({'status': 'ok', 'name': saved.name, 'size': saved.size, 'modified': saved.modified})
+        return web.json_response({'status': 'error', 'message': 'No file in the upload'}, status=400)
+
+    @require_permission(Permission.DELETE)
+    async def delete_cert(self, request: web.Request) -> web.Response:
+        name = request.match_info['name']
+        if not self._cert_store().delete(name):
+            return web.json_response({'status': 'error', 'message': f'No file named {name}'}, status=404)
+        return web.json_response({'status': 'ok', 'message': f'Deleted {name}'})
 
     # Authentication Handlers
 

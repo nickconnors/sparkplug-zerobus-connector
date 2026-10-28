@@ -63,12 +63,16 @@ class IdleClient:
     """A protocol client that connects forever (the tests look at configuration, not data)."""
 
     def __init__(self, config):
+        from sparkplug_connector.protocols.base import ProtocolType
         self.config = config
+        self.endpoint = config.get("endpoint")
+        self.protocol_type = ProtocolType.SPARKPLUG
         self.primary_host_id = config.get("primary_host_id") or None
         self.offline_after_seconds = config.get("offline_after_seconds", 30)
         self.online_after_seconds = config.get("online_after_seconds", 30)
         self.online_allowed = asyncio.Event()
         self.is_connected = False
+        self._stopped = asyncio.Event()
 
     async def go_offline(self):
         pass
@@ -77,16 +81,24 @@ class IdleClient:
         pass
 
     async def connect(self):
-        await asyncio.Event().wait()
+        await self._stopped.wait()
+        raise ConnectionError("stopped")
 
     async def stop(self):
-        pass
+        self._stopped.set()
 
     async def disconnect(self):
         pass
 
     def edge_nodes(self):
         return getattr(self, "nodes", [])
+
+    is_online = False
+    state_topic = None
+
+    def stats(self):
+        import collections
+        return collections.defaultdict(int, sequence_handling="strict", rebirth_refused=False, block_auto_rebirth=False)
 
     async def request_rebirth(self, group_id, edge_node_id):
         from sparkplug_connector.protocols.sparkplug_client import _valid_id

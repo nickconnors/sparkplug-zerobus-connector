@@ -163,21 +163,30 @@ py -3.12 -m venv .venv
 
 ## Web UI
 
-`http://127.0.0.1:8001/`: Overview (sources, Zerobus, each source's state), **Sources** (add, edit, delete,
-start, stop; the NBIRTH procedure settings), **Edge nodes** (each running source's edge nodes and devices,
-online or offline and since when; a rebirth request for an edge node), **ZeroBus** (endpoint, table, credentials, start and stop,
-diagnostics), Status, Metrics, Auth. A save goes to the file the connector was started with (`--config`):
-fields the form doesn't show stay as written there, `${env:...}` placeholders included; the API never
-returns passwords or secrets. The MQTT username, password, topics and TLS settings are set in the file only.
+`http://127.0.0.1:8001/`:
 
-The UI is a React app in `webui/apps/connector-ui`, built into `sparkplug_connector/web/static/connector-ui/`
-(not in git):
+- **Status**: rows written, queued rows, sources and edge nodes; each source's state (ONLINE/OFFLINE, MQTT, rows,
+  Zerobus, last error) with start and stop; Zerobus and the diagnostics; the counters.
+- **Sources**: add, edit, delete, start and stop: the endpoint, the MQTT user and password, client id, keep-alive,
+  topics, TLS files (from the Certificates page), the table, the Sparkplug settings and the NBIRTH procedure call.
+- **Edge nodes**: each running source's edge nodes and devices, online or offline and since when; a rebirth request
+  for an edge node.
+- **Zerobus**: workspace, endpoint, default table and service principal; start and stop; each open table's writer
+  and write-ahead log; checks of the endpoint and credentials (and a test stream).
+- **Settings**: the connector-wide settings (diagnostics, queue and batch, write-ahead log, the certificates'
+  directory), applied at the next start.
+- **Certificates**: upload, replace and delete the MQTT TLS files (`web_ui.certs_dir`, default
+  `~/.sparkplug_connector/certs`; in Docker, mount a volume there). A source's TLS path that is a bare file name is
+  read from this directory.
 
-```
-cd webui && npm ci && npm run build
-```
+A save goes to the file the connector was started with (`--config`): fields the page doesn't show stay as written
+there, `${env:...}` placeholders included; the API never returns passwords or secrets. An MQTT password typed on the
+page goes to the credential store (`CONNECTOR_MASTER_PASSWORD`), never into the file, or type `${env:NAME}`.
 
-(PowerShell: `cd webui; npm ci; npm run build`.)
+The pages are plain HTML with [Alpine.js](https://alpinejs.dev) (CSP build) and [Pico CSS](https://picocss.com),
+served from `sparkplug_connector/web/static/ui/` (versions and checksums: `vendor/VERSIONS.md`): no Node, no build
+step. The policy allows no inline script or style; changes are accepted only from the connector's own pages (a
+request from a page of another site is refused; there is no CORS).
 
 ### Login (off by default)
 
@@ -226,7 +235,7 @@ with `require_client_cert: true`).
 | `sparkplug_connector/core/` | the bridge (`bridge.py`), queues, confirmed writer, write-ahead log, target tables, config loading, credentials, logging, TLS |
 | `sparkplug_connector/web/` | web server, login, roles, input validation, security headers |
 | `sparkplug_connector/config/config.yaml` | the example configuration |
-| `webui/` | the React UI's source |
+| `sparkplug_connector/web/static/ui/` | the web page (HTML, Alpine.js, Pico CSS; no build) |
 | `tests/` | the test suite |
 | `scripts/` | `encrypt_config.py`, `generate_tls_cert.py` |
 
