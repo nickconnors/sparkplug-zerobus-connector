@@ -15,6 +15,7 @@ from sparkplug_connector.sparkplug.edge_node_schemas import (
     DatabricksSql,
     SqlError,
     birth_models,
+    model_view_names,
     nbirth_procedures,
     node_schema_name,
     retry_delay,
@@ -297,6 +298,7 @@ def test_names_as_the_procedure_makes_them():
         "motor", "pump_udt", "_types_conveyor_v2")
     assert birth_models(nbirth_msg()) == ()
     assert birth_models("not json") == () and birth_models("[]") == ()
+    assert model_view_names("pump_udt") == ("pump_udt", "pump_udt_vw", "pump_udt_asof_vw")   # base, _vw, _asof_vw
 
 
 async def test_an_nbirth_with_models_is_checked_for_its_views_in_the_procedures_catalog():
@@ -320,7 +322,7 @@ async def test_missing_views_fail_the_attempt_and_the_procedure_is_called_again(
                            "CALL sdp.stage_db.create_edge_node_schema(nb, G, E, false)"]
     s = n.status()
     assert (s.calls, s.checked, s.failures, s.gave_up) == (3, 2, 1, 0)
-    assert "v1.nb_g_e lacks motor_vw, motor_asof_vw" in s.last_error
+    assert "v1.nb_g_e lacks motor, motor_vw, motor_asof_vw" in s.last_error
 
 
 async def test_only_the_views_still_missing_are_named():
@@ -329,7 +331,7 @@ async def test_only_the_views_still_missing_are_named():
     await run_directly(n, Birth("G", "E", "n1", ("motor", "pump")))     # the procedure makes no pump views
     s = n.status()
     assert (s.failures, s.gave_up, s.checked) == (MAX_ATTEMPTS, 1, 0)
-    assert s.last_error.endswith("lacks pump_vw, pump_asof_vw")
+    assert s.last_error.endswith("lacks pump, pump_vw, pump_asof_vw")
     assert len(sql.calls()) == MAX_ATTEMPTS
 
 
@@ -368,4 +370,77 @@ async def test_a_schema_only_group_needs_its_schema_only():
     await run_directly(n, Birth("BRIDGE", "Bridge Info", "n1", ("bridge",)))
     await run_directly(n, Birth("G", "E", "n2", ("motor",)))  # another group: its views are checked
     s = n.status()
-    assert (s.checked, s.failures) == (1, MAX_ATTEMPTS) and "nb_g_e lacks motor_vw" in s.last_error
+    assert (s.checked, s.failures) == (1, MAX_ATTEMPTS) and "nb_g_e lacks motor, motor_vw" in s.last_error
+
+
+# ----------------------------------------------------------------------------- one call at a time, own births only
+
+class GatedSql(FakeSql):
+    """FakeSql whose CALLs wait for ``gate``; ``in_flight``/``most``: CALLs running now / at most at once."""
+
+    def __init__(self, models=()):
+        super().__init__(models)
+        self.gate = asyncio.Event()
+        self.in_flight = self.most = 0
+
+    async def execute(self, statement, params):
+        if not statement.startswith("CALL"):
+            return await super().execute(statement, params)
+        self.in_flight += 1
+        self.most = max(self.most, self.in_flight)
+        try:
+            await self.gate.wait()
+            return await super().execute(statement, params)
+        finally:
+            self.in_flight -= 1
+
+
+async def test_a_newer_nbirth_waits_for_the_call_running_for_its_edge_node():
+    """A call takes ~30 s live: an NBIRTH arriving meanwhile must not start a second run of the procedure on the
+    same schema (it replaces the same views), but run once the first is done, for the newer birth."""
+    sql = GatedSql(models=("motor",))
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep)
+    n.accept([row("NBIRTH", "G", "E", "n1", nbirth_msg("Motor"))])
+    await wait_until(lambda: sql.in_flight == 1)
+    n.accept([row("NBIRTH", "G", "E", "n2", nbirth_msg("Motor"))])
+    await asyncio.sleep(0.1)
+    assert sql.in_flight == 1 and "check n2" not in sql.log      # waiting, not even checking yet
+    sql.gate.set()
+    await wait_until(lambda: n.status().checked == 2)
+    assert sql.most == 1 and len(sql.calls()) == 2
+    assert sql.log.index("check n2") > sql.log.index(sql.calls()[0])
+    s = n.status()
+    assert (s.failures, s.pending) == (0, 0)
+    await n.stop()
+
+
+async def test_calls_for_other_edge_nodes_dont_wait_for_each_other():
+    sql = GatedSql()
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep)
+    n.accept([row("NBIRTH", "G", "E1", "n1"), row("NBIRTH", "G", "E2", "n2")])
+    await wait_until(lambda: sql.in_flight == 2)
+    sql.gate.set()
+    await wait_until(lambda: n.status().checked == 2)
+    await n.stop()
+
+
+async def test_an_nbirth_the_notifier_doesnt_own_calls_nothing():
+    """Two sources on one table: each notifier sees every row the writer wrote, and handles only its own."""
+    sql = FakeSql()
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep, owns=lambda r: r["msg_id"] != "theirs")
+    n.accept([row("NBIRTH", "G", "E1", "theirs"), row("NBIRTH", "G", "E2", "mine")])
+    await wait_until(lambda: n.status().checked == 1)
+    await asyncio.sleep(0.1)
+    assert sql.calls() == ["CALL v1.stage_db.create_edge_node_schema(nb, G, E2, false)"]
+    assert n.status().births == 1
+    await n.stop()
+
+
+async def test_the_check_logs_what_it_checked(caplog):
+    sql = FakeSql(models=("bridge",))
+    n = BirthNotifier(sql, RAW, [V1], coalesce_s=0, sleep=no_sleep, schema_only_groups=frozenset({"BRIDGE"}))
+    with caplog.at_level("INFO"):
+        await run_directly(n, Birth("BRIDGE", "Bridge Info", "n1", ("bridge",)))
+        await run_directly(n, Birth("G", "E", "n2", ("bridge",)))
+    assert "v1.nb_bridge_bridge_info exists for BRIDGE/Bridge Info (schema only)" in caplog.text
+    assert "v1.nb_g_e has the views of 1 models for G/E" in caplog.text

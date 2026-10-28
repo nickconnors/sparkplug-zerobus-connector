@@ -245,6 +245,39 @@ async def test_an_acknowledged_nbirth_calls_the_procedure(tmp_path, acked, hosts
     assert made[0].log == [f"check {nbirth.msg_id}", "CALL c.s.create_edge_node_schema(nb, Plant1, Line A, false)"]
 
 
+async def test_two_sources_on_one_table_each_call_their_procedure_for_their_own_nbirths(tmp_path, acked, hosts,
+                                                                                         monkeypatch):
+    """Both NBIRTH callers listen on the table's one writer, which reports every row it wrote: each handles only
+    the NBIRTHs its source handed on (one call per NBIRTH, its own procedure); an NBIRTH no source handed on (the
+    diagnostics', a write-ahead log replay) is handled once, by the first."""
+    made = []
+
+    class Sql(FakeSql):
+        def __init__(self, *args):
+            super().__init__(models=birth_models(to_tahu_json(NBIRTH)))   # the check finds the views
+            made.append(self)
+    monkeypatch.setattr(core_bridge, "DatabricksSql", Sql)
+    cfg = bridge_config(tmp_path)
+    schemas = lambda proc: {"enabled": True, "warehouse_id": "w", "procedures": [f"c.s.{proc}"]}
+    cfg["sources"] = [sparkplug_source(name="a", primary_host_id="host-a", edge_node_schemas=schemas("proc_a")),
+                      sparkplug_source(name="b", primary_host_id="host-b", edge_node_schemas=schemas("proc_b"))]
+    bridge = core_bridge.Bridge(cfg)
+    await bridge.start()
+    calls = lambda: sorted(c for sql in made for c in sql.calls())
+    try:
+        assert len(made) == 2
+        bridge._on_record(convert("spBv1.0/Plant1/NBIRTH/Line A", NBIRTH, 1790694245123).row, "a")
+        bridge._on_record(convert("spBv1.0/Plant1/NBIRTH/Line B", NBIRTH, 1790694245124).row, "b")
+        await wait_for(lambda: len(calls()) >= 2, 10)
+        bridge._on_record(convert("spBv1.0/Plant1/NBIRTH/Line C", NBIRTH, 1790694245125).row)   # no source
+        await wait_for(lambda: len(calls()) >= 3, 10)
+        await asyncio.sleep(0.3)                            # no second call for any of them
+    finally:
+        await bridge.stop()
+    assert calls() == ["CALL c.s.proc_a(nb, Plant1, Line A, false)", "CALL c.s.proc_a(nb, Plant1, Line C, false)",
+                       "CALL c.s.proc_b(nb, Plant1, Line B, false)"]
+
+
 async def test_a_sparkplug_protocol_written_with_capitals_is_still_a_primary_host(tmp_path, acked, hosts):
     """The factory takes the protocol in any case; a primary host without its supervisor waits to go ONLINE for good."""
     cfg = bridge_config(tmp_path)

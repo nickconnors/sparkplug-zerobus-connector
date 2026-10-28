@@ -17,7 +17,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sparkplug_connector.protocols.base import ProtocolClient
 from sparkplug_connector.protocols.factory import create_protocol_client
@@ -35,6 +35,7 @@ from sparkplug_connector.sparkplug.host import HostState, HostSupervisor
 logger = logging.getLogger(__name__)
 
 HEALTHY_SESSION_S = 60.0   # a source connection that lasted this long starts its reconnect backoff again
+NBIRTH_SOURCES_KEPT = 10000   # NBIRTH msg_ids remembered with their source, for the NBIRTH callers (_owns_nbirth)
 
 
 def _iso_ms(ms: Optional[float]) -> Optional[str]:
@@ -110,6 +111,8 @@ class Bridge:
         self.host_tasks: Dict[str, asyncio.Task] = {}
         self.birth_notifiers: Dict[str, BirthNotifier] = {}
         self._notifier_writers: Dict[str, ConfirmedWriter] = {}
+        # msg_id -> the source that handed the NBIRTH on (its caller handles it; the latest NBIRTH_SOURCES_KEPT)
+        self._nbirth_sources: "collections.OrderedDict[str, str]" = collections.OrderedDict()
 
         # Source clients
         self.clients: Dict[str, ProtocolClient] = {}
@@ -467,7 +470,8 @@ class Bridge:
             notifier = BirthNotifier(sql, table.full_table_name, procedures,
                                      prefix=str(schemas.get('schema_prefix') or '').strip() or 'nb',
                                      check_views=_enabled(schemas.get('check_views', True)),
-                                     schema_only_groups=frozenset({self.diagnostics.group_id}) if self.diagnostics else frozenset())
+                                     schema_only_groups=frozenset({self.diagnostics.group_id}) if self.diagnostics else frozenset(),
+                                     owns=self._owns_nbirth(source_name))
             writer.add_listener(notifier.accept)
             self.birth_notifiers[source_name] = notifier
             self._notifier_writers[source_name] = writer
@@ -624,12 +628,28 @@ class Bridge:
 
     def _on_record(self, row: "raw_row.RawRow", source_name: Optional[str] = None):
         """A Sparkplug row from a source: queued for its target table unchanged (no source: the default table)."""
+        if source_name is not None and row.message_type == 'NBIRTH':
+            self._nbirth_sources[row.msg_id] = source_name
+            if len(self._nbirth_sources) > NBIRTH_SOURCES_KEPT:
+                self._nbirth_sources.popitem(last=False)
         if self.diagnostics is not None:
             try:
                 self.diagnostics.tracker.on_row(row)
             except Exception as e:  # noqa: BLE001 - the counters must not cost the row
                 logger.warning(f"[{source_name}] diagnostics counters: {type(e).__name__}: {e}")
         self._on_raw_row(row, self._queue_for_source(source_name))
+
+    def _owns_nbirth(self, source_name: str) -> Callable[[Dict[str, Any]], bool]:
+        """Whether an acknowledged NBIRTH row is for this source's caller: the writer reports every row of its
+        table, so with sources sharing a table each caller takes the NBIRTHs its source handed on; one no source
+        handed on (the diagnostics', a write-ahead log replay) goes to the first caller on that writer."""
+        def owns(row: Dict[str, Any]) -> bool:
+            owner = self._nbirth_sources.get(row.get('msg_id'))
+            if owner is not None:
+                return owner == source_name
+            writer = self._notifier_writers.get(source_name)
+            return next((n for n, w in self._notifier_writers.items() if w is writer), None) == source_name
+        return owns
 
     def _diagnose_client(self, source_name: str, connected: bool) -> None:
         if self.diagnostics is not None:

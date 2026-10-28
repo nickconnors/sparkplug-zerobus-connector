@@ -8,14 +8,17 @@ Fed with the rows Zerobus has acknowledged (the confirmed writer's listener), so
 table; before calling, it waits until the row is readable there (the procedure reads the latest NBIRTH
 back). Off the MQTT and Zerobus paths: NBIRTHs of one edge node within ``coalesce_s`` make one call (a
 rebirth often brings two), a failed call is retried with backoff (procedures already done aren't called
-again; ~5 minutes, then given up and counted), and a newer NBIRTH replaces a pending one. Calls pending
+again; ~5 minutes, then given up and counted), and a newer NBIRTH replaces a pending one. One call at a time
+per edge node: a newer NBIRTH waits for the call running for its edge node (each run replaces the same views; two at
+once break each other), then runs. ``owns`` picks the NBIRTHs this caller handles (the writer reports every row of
+its table, so with two sources on one table each caller takes its own source's). Calls pending
 at stop are logged and dropped: the next NBIRTH (or ``create_all_edge_node_schemas``) catches up.
 A procedure's name goes into the statement's text (identifiers can't be bound), so it must be a
 three-part name (``nbirth_procedures``).
 
 After each call it checks that the procedure made the edge node's objects (``check_views``, on by default): in the
 procedure's catalog, the schema ``<prefix>_<group>_<edge node>`` and, for each model (each top-level Template metric
-of the NBIRTH), the views ``<model>_vw`` and ``<model>_asof_vw``; names as the procedure makes them, lower case, each
+of the NBIRTH), the views ``<model>``, ``<model>_vw`` and ``<model>_asof_vw``; names as the procedure makes them, lower case, each
 run of characters other than ``[A-Za-z0-9]`` replaced by ``_`` (``node_schema_name``, ``model_view_names``). An NBIRTH
 without models, or of a group in ``schema_only_groups`` (the connector's diagnostics): the schema only. Something missing fails the attempt: the procedure is called again at the next one.
 
@@ -80,8 +83,9 @@ def birth_models(msg: str) -> tuple[str, ...]:
     return tuple(models)
 
 
-def model_view_names(model: str) -> tuple[str, str]:
-    return f"{model}_vw", f"{model}_asof_vw"
+def model_view_names(model: str) -> tuple[str, str, str]:
+    """The three views the procedure makes per model: the base view, ``_vw`` and ``_asof_vw``."""
+    return model, f"{model}_vw", f"{model}_asof_vw"
 
 
 class ObjectsMissing(Exception):
@@ -143,14 +147,16 @@ class BirthNotifier:
     def __init__(self, sql: Sql, raw_table: str, procedures: list[str], prefix: str = "nb", coalesce_s: float = 2.0,
                  readable_within_s: float = 60.0, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
                  clock: Callable[[], float] = time.time, check_views: bool = True,
-                 schema_only_groups: frozenset[str] = frozenset()):
+                 schema_only_groups: frozenset[str] = frozenset(),
+                 owns: Callable[[dict[str, Any]], bool] = lambda row: True):
         self._raw_table = quoted_table(raw_table)
         procedures = nbirth_procedures({"procedures": procedures})
         self._sql, self._procedures, self._prefix = sql, procedures, prefix
         self._coalesce, self._readable_within, self._sleep, self._clock = coalesce_s, readable_within_s, sleep, clock
         self._latest: dict[str, Birth] = {}
         self._tasks: set[asyncio.Task] = set()
-        self._check_views, self._schema_only = check_views, schema_only_groups
+        self._check_views, self._schema_only, self._owns = check_views, schema_only_groups, owns
+        self._running: dict[str, asyncio.Lock] = {}     # per edge node: one call at a time
         self._births = self._calls = self._failures = self._gave_up = self._checked = 0
         self._last_error: str | None = None
 
@@ -160,8 +166,8 @@ class BirthNotifier:
             if '"message_type":"NBIRTH"' not in text:
                 continue
             row = json.loads(text)
-            if row.get("message_type") != "NBIRTH":
-                continue
+            if row.get("message_type") != "NBIRTH" or not self._owns(row):
+                continue                            # another source's NBIRTH on the same table: its own caller
             self._births += 1
             b = Birth(row["group_id"], row["edge_node_id"], row["msg_id"], birth_models(row.get("msg") or ""))
             self._latest[b.key] = b
@@ -176,10 +182,12 @@ class BirthNotifier:
         done: set[str] = set()
         await self._sleep(delay)
         for attempt in range(MAX_ATTEMPTS):
-            if self._latest.get(b.key) is not b:
-                return                              # a newer NBIRTH of this edge node has its own call
-            if await self.run(b, attempt, done):
-                return
+            # one call at a time per edge node: each call replaces the same views, two at once break each other
+            async with self._running.setdefault(b.key, asyncio.Lock()):
+                if self._latest.get(b.key) is not b:
+                    return                          # a newer NBIRTH of this edge node has its own call
+                if await self.run(b, attempt, done):
+                    return
             if attempt + 1 < MAX_ATTEMPTS:
                 await self._sleep(retry_delay(attempt))
 
@@ -221,7 +229,8 @@ class BirthNotifier:
         """The edge node's schema and its models' views, in the procedure's catalog."""
         catalog = _CATALOG.match(procedure).group(1)
         schema = node_schema_name(self._prefix, b.group_id, b.edge_node_id)
-        if b.models and b.group_id not in self._schema_only:
+        views = bool(b.models) and b.group_id not in self._schema_only
+        if views:
             rows = await self._sql.execute(f"SELECT table_name FROM {catalog}.information_schema.views "
                                            "WHERE table_schema = :schema", {"schema": schema})
             found = {r[0] for r in rows if r and r[0]}
@@ -233,7 +242,10 @@ class BirthNotifier:
         if missing:
             raise ObjectsMissing(f"{procedure} returned, but {catalog}.{schema} lacks {', '.join(missing)}")
         self._checked += 1
-        logger.info("%s.%s has the views of %d models for %s", catalog, schema, len(b.models), b.key)
+        if views:
+            logger.info("%s.%s has the views of %d models for %s", catalog, schema, len(b.models), b.key)
+        else:
+            logger.info("%s.%s exists for %s (schema only)", catalog, schema, b.key)
 
     async def _await_readable(self, b: Birth) -> None:
         deadline = self._clock() + self._readable_within

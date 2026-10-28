@@ -190,10 +190,13 @@ one with the same id fights over STATE, and two connectors with different ids wr
   out of order can be written twice after a crash (same `msg_id`).
 - **NBIRTH** (`edge_node_schemas.py`): once Zerobus has acknowledged an NBIRTH and it is readable in the
   table, each NBIRTH procedure is called, off the MQTT and Zerobus paths; NBIRTHs of one
-  edge node within 2 s make one call; a failed call is retried for ~5 minutes, then given up and counted.
+  edge node within 2 s make one call; one call at a time per edge node (an NBIRTH arriving during a call waits
+  for it, then runs); a failed call is retried for ~5 minutes, then given up and counted. Sources sharing a
+  table each call their own procedures for the NBIRTHs they received only (an NBIRTH no source received, the
+  diagnostics' or one replayed from the write-ahead log, goes to the table's first source with NBIRTH calls).
   With `check_views` (on by default), after each call the connector looks in the procedure's catalog
   (`information_schema`) for the edge node's schema, `<prefix>_<group>_<edge node>`, and for each model of the
-  NBIRTH (each top-level Template metric) its views `<model>_vw` and `<model>_asof_vw`, named as
+  NBIRTH (each top-level Template metric) its views `<model>`, `<model>_vw` and `<model>_asof_vw`, named as
   `create_edge_node_schema` names them (lower case, each run of characters other than `[A-Za-z0-9]` -> `_`); an
   NBIRTH without models needs the schema only. Something missing counts as a failed call: the procedure is called
   again at the next retry. Switch it off for a procedure that makes other objects.
