@@ -181,8 +181,9 @@ py -3.12 -m venv .venv
 
 A save goes to the file the connector was started with (`--config`): fields the page doesn't show stay as written
 there, `${env:...}` placeholders included; the API never returns passwords or secrets. Secrets come from environment
-variables only: the page's MQTT password and Zerobus client secret fields take a variable's **name** (saved as
-`${env:NAME}`) and show whether it is set in the connector's environment; a secret's value is refused.
+variables only: a source's MQTT password field takes a variable's **name** (saved as `${env:NAME}`), and the Zerobus
+client secret is `DATABRICKS_CLIENT_SECRET` (`${env:DATABRICKS_CLIENT_SECRET}` in the file); the page shows whether
+each is set in the connector's environment, and a secret's value is refused.
 
 The pages are plain HTML with [Alpine.js](https://alpinejs.dev) (CSP build) and [Pico CSS](https://picocss.com),
 served from `sparkplug_connector/web/static/ui/` (versions and checksums: `vendor/VERSIONS.md`): no Node, no build

@@ -145,3 +145,27 @@ async def test_edge_nodes_and_a_rebirth_request(tab):
     await t.click("button:has-text(\"Request rebirth\")")
     await t.wait_for_selector(".toast >> text=NCMD sent")
     assert bridge.clients["sp"].rebirths == [("Plant1", "Line A")] and t.errors == []
+
+
+@pytest.mark.parametrize("is_set", [False, True])
+async def test_the_zerobus_page_calls_out_the_secrets_variable(tab, monkeypatch, is_set):
+    t, path, _ = tab
+    if is_set:
+        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "from-env")
+    else:
+        monkeypatch.delenv("DATABRICKS_CLIENT_SECRET", raising=False)
+    await t.goto("/zerobus.html")
+    await t.wait_for_selector(".secret-env >> text=DATABRICKS_CLIENT_SECRET")
+    if os.environ.get("UI_SCREENSHOTS") and is_set:
+        await t.screenshot(path=os.path.join(os.environ["UI_SCREENSHOTS"], "zerobus-secret.png"))
+    assert await t.locator("input[type=password]").count() == 0                 # no field for a secret's value
+    await t.fill("#z-host", "https://example.cloud.databricks.com")
+    await t.fill("#z-endpoint", "123.zerobus.us-east-1.cloud.databricks.com")
+    await t.fill("#z-table", "c.s.sparkplug_raw")
+    await t.click("button[type=submit] >> text=Save")
+    await t.wait_for_selector(".toast")
+    assert yaml.safe_load(path.read_text())["zerobus"]["auth"]["client_secret"] == "${env:DATABRICKS_CLIENT_SECRET}"
+    note = t.locator(".secret-env + small")
+    await playwright_api.expect(note).to_have_text("Set in the connector's environment." if is_set else
+                                                   "Not set: set it in the connector's environment, then restart the connector.")
+    assert t.errors == []

@@ -51,9 +51,10 @@
             <input id="z-cid" x-model="form.client_id" placeholder="the service principal's application ID" spellcheck="false" autocomplete="off">
           </div>
           <div>
-            <label for="z-secret">Client secret variable</label>
-            <input id="z-secret" x-model="form.client_secret_env" placeholder="DATABRICKS_CLIENT_SECRET" autocomplete="off" spellcheck="false" :aria-invalid="invalid('client_secret_env')">
-            <small x-text="error('client_secret_env') || secretNote"></small>
+            <label>Client secret</label>
+            <p class="secret-env"><span class="dot" :class="secretSet ? 'dot-ok' : 'dot-err'"></span>From the environment variable
+              <span class="mono" x-text="secretVariable"></span></p>
+            <small x-text="secretNote"></small>
           </div>
         </div>
         <label class="switch"><input type="checkbox" role="switch" x-model="form.enabled"> Start Zerobus with the connector</label>
@@ -73,7 +74,7 @@
         <tbody>
           <template x-for="t in targets" :key="t.id">
             <tr>
-              <td class="mono" x-text="t.id"></td>
+              <td class="mono" x-text="t.table"></td>
               <td class="nowrap"><span class="dot" :class="t.ok ? 'dot-ok' : 'dot-err'"></span><span x-text="t.stream"></span></td>
               <td x-text="t.written"></td>
               <td x-text="t.inFlight"></td>

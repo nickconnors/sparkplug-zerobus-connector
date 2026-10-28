@@ -80,7 +80,9 @@ document.addEventListener('alpine:init', () => {
 
     get zerobusOn() { return !!this.status.zerobus_enabled; },
     get zerobusState() { return this.zerobusOn ? (this.status.zerobus_connected ? 'on' : 'on, no table open') : 'off'; },
-    get targets() { return this.status.zerobus_targets || []; },
+    get targets() {   // catalog.schema.table (an id starts with the workspace)
+      return (this.status.zerobus_targets || []).map((id) => id.split('.').slice(-3).join('.'));
+    },
     get diagnosticsNote() {
       const d = this.status.diagnostics;
       return d ? 'on, group ' + d.group_id + ' (' + window.fmt.number(d.rows_queued) + ' rows)' : 'off';

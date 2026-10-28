@@ -277,3 +277,4 @@ dialog article > footer button { margin: 0; width: auto; }
 /* --- misc --- */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 button.danger { --pico-background-color: var(--err); --pico-border-color: var(--err); --pico-color: #fff; }
+.secret-env { margin: .35rem 0 .25rem; }
