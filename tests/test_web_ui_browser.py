@@ -169,3 +169,38 @@ async def test_the_zerobus_page_calls_out_the_secrets_variable(tab, monkeypatch,
     await playwright_api.expect(note).to_have_text("Set in the connector's environment." if is_set else
                                                    "Not set: set it in the connector's environment, then restart the connector.")
     assert t.errors == []
+
+
+async def _patched(t, failing: bool):
+    """/api/status with Zerobus on and /api/sparkplug/health with a writer error, current (failing) or recovered."""
+    import json
+
+    async def status(route):
+        body = json.loads(await (await route.fetch()).text())
+        body.update(zerobus_enabled=True, zerobus_connected=True)
+        await route.fulfill(json=body)
+
+    async def health(route):
+        body = json.loads(await (await route.fetch()).text())
+        for h in body.values():
+            h.update(last_error="opening a Zerobus stream: unreachable", zerobus_last_error_at="2026-10-28T21:04:48.000Z",
+                     zerobus_failing_since="2026-10-28T21:03:56.000Z" if failing else None, zerobus_stream_open=not failing)
+        await route.fulfill(json=body)
+    await t.route("**/api/status", status)
+    await t.route("**/api/sparkplug/health", health)
+
+
+@pytest.mark.parametrize("failing", [True, False])
+async def test_a_recovered_writer_error_is_history_not_a_current_error(tab, failing):
+    """After an outage the writer keeps its last error: the top bar says "errors" only while it is failing, and the
+    Status table shows the last error with its time, in the error colour only while failing."""
+    t, _, _ = tab
+    await _patched(t, failing)
+    await t.goto("/")
+    pill = t.locator(".pill")
+    await playwright_api.expect(pill).to_have_text("Running · errors" if failing else "Running")
+    cell = t.locator("main table tbody tr td.last-error").first
+    await playwright_api.expect(cell).to_contain_text("opening a Zerobus stream: unreachable")
+    assert "2026" in await cell.inner_text()                                   # with its time
+    assert ("error-text" in (await cell.get_attribute("class"))) is failing
+    assert t.errors == []

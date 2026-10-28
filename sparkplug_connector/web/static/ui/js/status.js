@@ -73,7 +73,8 @@ document.addEventListener('alpine:init', () => {
           rows: h ? window.fmt.number(h.rows_written || 0) + ' written' : '–',
           zerobus: h ? (h.zerobus_failing_since ? 'failing since ' + window.fmt.dateTime(h.zerobus_failing_since)
             : (h.zerobus_stream_open ? 'stream open' : 'no stream')) : '–',
-          error: h ? (h.last_error || '') : '',
+          error: h && h.last_error ? window.fmt.dateTime(h.zerobus_last_error_at) + ': ' + h.last_error : '',
+          errorNow: !!(h && h.zerobus_failing_since),     // else the last error is history
         };
       });
     },

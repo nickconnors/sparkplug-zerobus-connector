@@ -159,7 +159,8 @@
 
       get failing() {
         const health = Alpine.store('connector').health || {};
-        return Object.keys(health).filter((k) => health[k] && (health[k].zerobus_failing_since || health[k].last_error));
+        // failing now; a last_error stays after recovery as history (the tables show it, muted)
+        return Object.keys(health).filter((k) => health[k] && health[k].zerobus_failing_since);
       },
       get stateLabel() {
         const s = this.status;

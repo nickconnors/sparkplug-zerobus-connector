@@ -119,6 +119,21 @@ async def test_failing_since_marks_the_first_failure_and_backs_off_exponentially
     assert writer.status().failing_since is None
 
 
+async def test_the_last_error_and_its_time_stay_after_recovery(setup):
+    """For the pages: an error is current only while failing_since is set; last_error (and when) stays as history."""
+    writer, _, streams, clock, _ = setup
+    streams.fail_opens = 2
+    start = clock.now
+    await writer.step()                                   # fails, then backs off 1 s
+    await writer.step()                                   # fails again (then backs off 2 s)
+    last = start + 1                                      # the second failure's time
+    s = writer.status()
+    assert s.failing_since is not None and s.last_error_at == last
+    await writer.step()                                   # opens, writes
+    s = writer.status()
+    assert s.failing_since is None and "workspace unreachable" in s.last_error and s.last_error_at == last
+
+
 async def test_backoff_is_capped(setup):
     writer, _, streams, _, sleeps = setup
     streams.fail_opens = 10

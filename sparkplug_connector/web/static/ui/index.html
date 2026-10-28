@@ -60,7 +60,7 @@
               <td class="nowrap" x-text="s.mqtt"></td>
               <td class="nowrap" x-text="s.rows"></td>
               <td class="nowrap" x-text="s.zerobus"></td>
-              <td class="error-text" x-text="s.error"></td>
+              <td class="last-error" :class="s.errorNow ? 'error-text' : 'muted'" x-text="s.error"></td>
               <td class="actions">
                 <button type="button" class="small" x-show="!s.running" @click="startSource(s.name)" :disabled="!!busy || !can('start_stop')" :aria-busy="busy === s.name">
                   <span data-icon="play"></span>Start</button>

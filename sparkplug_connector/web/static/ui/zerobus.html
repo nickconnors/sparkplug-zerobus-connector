@@ -80,7 +80,7 @@
               <td x-text="t.inFlight"></td>
               <td x-text="t.queue"></td>
               <td x-text="t.wal"></td>
-              <td class="error-text" x-text="t.error"></td>
+              <td class="last-error" :class="t.errorNow ? 'error-text' : 'muted'" x-text="t.error"></td>
             </tr>
           </template>
         </tbody>

@@ -824,7 +824,8 @@ class Bridge:
                           'rows_unconvertible': w.rows_unconvertible,
                           'zerobus_failures': w.failures, 'batch_in_flight': w.batch_in_flight,
                           'zerobus_failing_since': iso(w.failing_since), 'batch_pending_since': iso(w.pending_since),
-                          'zerobus_last_success': iso(w.last_success), 'last_error': w.last_error})
+                          'zerobus_last_success': iso(w.last_success), 'last_error': w.last_error,
+                          'zerobus_last_error_at': iso(w.last_error_at)})
             wal = self.wals.get(self._get_target_for_source(name))
             if wal is not None:
                 st = wal.status()

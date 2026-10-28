@@ -121,7 +121,8 @@ document.addEventListener('alpine:init', () => {
           inFlight: window.fmt.number(w.batch_in_flight),
           queue: window.fmt.number(w.queue_depth) + (w.queue_high_water ? ' (high)' : ''),
           wal: wal ? window.fmt.number(wal.pending) + ' pending, ' + window.fmt.bytes(wal.bytes || 0) : 'off',
-          error: w.last_error || '',
+          error: w.last_error ? window.fmt.dateTime(w.last_error_at) + ': ' + w.last_error : '',
+          errorNow: !!w.failing_since,
         };
       });
     },
