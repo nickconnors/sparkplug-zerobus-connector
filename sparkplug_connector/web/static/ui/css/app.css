@@ -248,6 +248,7 @@ dialog article > footer button { margin: 0; width: auto; }
 .auth .brand { justify-content: center; padding-bottom: .5rem; }
 .auth h1 { font-size: 1.3rem; text-align: center; margin-bottom: .25rem; }
 .auth p.lead { text-align: center; color: var(--pico-muted-color); }
+.auth a[role="button"] { display: block; width: fit-content; margin: 1rem auto 0; }   /* centred, its own width */
 
 /* --- small screens --- */
 @media (max-width: 1000px) {

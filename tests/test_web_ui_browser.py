@@ -261,3 +261,15 @@ async def test_a_zerobus_save_keeps_a_secret_the_page_did_not_set(tab, monkeypat
     saved = yaml.safe_load(path.read_text())["zerobus"]
     assert saved["auth"]["client_secret"] == secret and saved["workspace_host"] == "https://example.cloud.databricks.com"
     assert t.errors == []
+
+
+async def test_the_sign_in_button_is_centred_on_the_login_page(tab):
+    t, _, _ = tab
+    # as with the login on and nobody signed in (else the page goes straight to the connector)
+    await t.route("**/api/auth/status", lambda route: route.fulfill(json={"auth_enabled": True, "authenticated": False}))
+    await t.goto("/static/login.html")
+    button = await t.get_by_role("button", name="Sign in with Databricks").bounding_box()
+    card = await t.locator(".auth article").bounding_box()
+    assert abs((button["x"] + button["width"] / 2) - (card["x"] + card["width"] / 2)) <= 1
+    assert button["width"] < card["width"]                     # a button, not a full-width bar
+    assert t.errors == []
