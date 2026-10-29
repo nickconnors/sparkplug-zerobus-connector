@@ -194,12 +194,13 @@ one with the same id fights over STATE, and two connectors with different ids wr
   for it, then runs); a failed call is retried for ~5 minutes, then given up and counted. Sources sharing a
   table each call their own procedures for the NBIRTHs they received only (an NBIRTH no source received, the
   diagnostics' or one replayed from the write-ahead log, goes to the table's first source with NBIRTH calls).
-  With `check_views` (on by default), after each call the connector looks in the procedure's catalog
+  With `check_views` (on by default), after each call of a procedure named `create_edge_node_schema` (others in
+  the list are called, not checked) the connector looks in the procedure's catalog
   (`information_schema`) for the edge node's schema, `<prefix>_<group>_<edge node>`, and for each model of the
   NBIRTH (each top-level Template metric) its views `<model>`, `<model>_vw` and `<model>_asof_vw`, named as
   `create_edge_node_schema` names them (lower case, each run of characters other than `[A-Za-z0-9]` -> `_`); an
   NBIRTH without models needs the schema only. Something missing counts as a failed call: the procedure is called
-  again at the next retry. Switch it off for a procedure that makes other objects.
+  again at the next retry. Switch it off for a `create_edge_node_schema` of your own that makes other objects.
 - **Diagnostics** (`diagnostics.py`, `diagnostics.enabled`, off by default): the connector's own edge nodes,
   whose rows it writes into `zerobus.default_target` itself (nothing on MQTT), in the group `diagnostics.group_id`
   (default `BRIDGE`), each with one device named after its model; templates version `v2.0.0`:

@@ -444,3 +444,20 @@ async def test_the_check_logs_what_it_checked(caplog):
         await run_directly(n, Birth("G", "E", "n2", ("bridge",)))
     assert "v1.nb_bridge_bridge_info exists for BRIDGE/Bridge Info (schema only)" in caplog.text
     assert "v1.nb_g_e has the views of 1 models for G/E" in caplog.text
+
+
+async def test_only_the_create_edge_node_schema_procedures_are_checked():
+    """Other procedures in the list (a grant, a custom builder) make other objects or none: checking them would fail
+    every NBIRTH and retry it for ~5 minutes. They are called, not checked."""
+    class Sql(FakeSql):
+        async def execute(self, statement, params):
+            if statement.startswith("CALL") and "create_edge_node_schema" not in statement:
+                self.log.append(statement.split("(")[0])
+                return []                                   # makes nothing
+            return await super().execute(statement, params)
+    sql = Sql(models=("motor",))
+    n = BirthNotifier(sql, RAW, [V1, "x.s.grant_readers", "y.s.my_builder"], coalesce_s=0, sleep=no_sleep)
+    await run_directly(n, Birth("G", "E", "n1", ("motor",)))
+    s = n.status()
+    assert (s.calls, s.checked, s.failures, s.gave_up) == (3, 1, 0, 0)
+    assert sql.lookups == [("v1", "nb_g_e")]

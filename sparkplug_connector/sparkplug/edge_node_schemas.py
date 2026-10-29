@@ -16,7 +16,8 @@ at stop are logged and dropped: the next NBIRTH (or ``create_all_edge_node_schem
 A procedure's name goes into the statement's text (identifiers can't be bound), so it must be a
 three-part name (``nbirth_procedures``).
 
-After each call it checks that the procedure made the edge node's objects (``check_views``, on by default): in the
+After each call of a ``create_edge_node_schema`` procedure (``builds_views``; another procedure in the list is not
+checked) it checks that the procedure made the edge node's objects (``check_views``, on by default): in the
 procedure's catalog, the schema ``<prefix>_<group>_<edge node>`` and, for each model (each top-level Template metric
 of the NBIRTH), the views ``<model>``, ``<model>_vw`` and ``<model>_asof_vw``; names as the procedure makes them, lower case, each
 run of characters other than ``[A-Za-z0-9]`` replaced by ``_`` (``node_schema_name``, ``model_view_names``). An NBIRTH
@@ -86,6 +87,13 @@ def birth_models(msg: str) -> tuple[str, ...]:
 def model_view_names(model: str) -> tuple[str, str, str]:
     """The three views the procedure makes per model: the base view, ``_vw`` and ``_asof_vw``."""
     return model, f"{model}_vw", f"{model}_asof_vw"
+
+
+def builds_views(procedure: str) -> bool:
+    """Whether the check applies after this procedure: one named ``create_edge_node_schema`` (in any catalog and
+    schema) builds the schema and views the check looks for; another (a grant, a builder of other objects) is called,
+    not checked."""
+    return procedure.rsplit(".", 1)[-1].strip("`").lower() == "create_edge_node_schema"
 
 
 class ObjectsMissing(Exception):
@@ -203,7 +211,7 @@ class BirthNotifier:
                                         {"prefix": self._prefix, "group_id": b.group_id, "edge_node_id": b.edge_node_id})
                 self._calls += 1
                 logger.info("%s for %s (NBIRTH %s) in %d ms", procedure, b.key, b.msg_id, (time.monotonic() - t0) * 1000)
-                if self._check_views:
+                if self._check_views and builds_views(procedure):
                     await self._check(procedure, b)     # ObjectsMissing: called again at the next attempt
                 done.add(procedure)
             if self._latest.get(b.key) is b:
