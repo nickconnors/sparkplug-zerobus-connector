@@ -122,6 +122,22 @@ def test_the_counters_follow_the_rows_the_sources_hand_on():
     assert (t.mqtt_message_count, t.models, t.instances) == (5, {"Motor"}, {("G", "E", "D"): {"Motor 1"}})
 
 
+def test_a_payload_timestamp_no_date_can_hold_uses_the_receive_time():
+    """A Java Date prints any long; Python's dates end at year 9999: one edge node sending microseconds (or garbage)
+    must not stop every later refresh (refresh_rows would raise each time)."""
+    from payloads import metric, payload
+    bdseq = metric("bdSeq", 4, long_value=0)
+    t = Tracker()
+    d = _diagnostics(t)
+    d.start_rows()
+    for row in _rows(("spBv1.0/G/NBIRTH/E", payload(bdseq, timestamp=1_793_215_586_614_000, seq=0), 1_793_215_586_700),
+                     ("spBv1.0/G/NDEATH/E", payload(bdseq, timestamp=2**62, seq=None), 1_793_215_590_000)):
+        t.on_row(row)
+    node = t.edge_nodes[("G", "E")]
+    assert (node.connect_ms, node.disconnect_ms) == (1_793_215_586_700, 1_793_215_590_000)
+    assert d.refresh_rows()                                 # no exception: rows for the change
+
+
 def test_mqtt_clients():
     t = Tracker()
     t.add_client("sp", "databricks-sparkplug", "mqtt://chariot:1883")

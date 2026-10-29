@@ -44,6 +44,9 @@ _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
+_LAST_DATE_MS = 253402300800000                # 10000-01-01T00:00:00Z: the first ms a Python date can't hold
+
+
 def java_date_string(ms: int, tz: datetime.tzinfo | None = None) -> str:
     """``new java.util.Date(ms).toString()``: ``EEE MMM dd HH:mm:ss zzz yyyy`` in English, in ``tz`` (default: the
     process's local time zone, as a JVM's default)."""
@@ -94,7 +97,9 @@ class Tracker:
         if kind in ("NBIRTH", "NDEATH", "DBIRTH"):
             payload = _payload(row.msg)
             when = payload.get("timestamp")
-            when = when if isinstance(when, int) else row.inserted_at
+            # a Java Date prints any long, Python's dates end at year 9999: a timestamp no date holds (microseconds,
+            # garbage) would make every later refresh raise, so the row's receive time stands in
+            when = when if isinstance(when, int) and 0 <= when < _LAST_DATE_MS else row.inserted_at
             if kind == "NBIRTH":
                 self._templates(key, payload)
                 node.online, node.connect_ms = True, when
