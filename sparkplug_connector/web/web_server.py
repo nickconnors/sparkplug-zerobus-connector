@@ -13,6 +13,7 @@ Secrets (a source's MQTT password, the Zerobus client secret) come from environm
 """
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -194,6 +195,19 @@ def _edited(entry: Dict[str, Any], current: Dict[str, Any], form: Dict[str, Any]
     return out
 
 
+def config_write(handler):
+    """A change to the configuration file: one at a time, its If-Match checked once it is its turn (checked before the
+    handler's awaits, two saves on one version could both pass, the second overwriting the first)."""
+    @functools.wraps(handler)
+    async def wrapper(self, request: web.Request) -> web.Response:
+        async with self._config_lock:
+            stale = self._stale(request)
+            if stale is not None:
+                return stale
+            return await handler(self, request)
+    return wrapper
+
+
 class WebServer:
     """Web server for configuration and monitoring."""
 
@@ -225,6 +239,7 @@ class WebServer:
         self.security_logger = get_structured_logger()
         self.ssl_context = None
         self.restart_required = False       # settings saved that apply at the next start
+        self._config_lock = asyncio.Lock()  # the configuration file's changes, one at a time (config_write)
         self.read_only = str(web_ui_config.get('read_only', False)).strip().lower() in ('true', '1', 'yes', 'on')
 
     async def start(self):
@@ -397,11 +412,12 @@ class WebServer:
         return {**data, 'password': os.environ.get(ENV_REF.match(password).group(1), '')}, {**data, 'password': password}
 
     @require_permission(Permission.WRITE)
+    @config_write
     async def add_source(self, request: web.Request) -> web.Response:
         """Add new data source."""
-        stale = self._stale(request)          # before anything changes
-        if stale is not None:
-            return stale
+        refused = self._needs_settled_bridge()
+        if refused is not None:
+            return refused
         try:
             data = await request.json()
 
@@ -446,11 +462,12 @@ class WebServer:
             return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
     @require_permission(Permission.DELETE)
+    @config_write
     async def remove_source(self, request: web.Request) -> web.Response:
         """Remove data source."""
-        stale = self._stale(request)          # before anything changes
-        if stale is not None:
-            return stale
+        refused = self._needs_settled_bridge()
+        if refused is not None:
+            return refused
         try:
             source_name = request.match_info['name']
 
@@ -467,11 +484,12 @@ class WebServer:
             return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
     @require_permission(Permission.WRITE)
+    @config_write
     async def update_source(self, request: web.Request) -> web.Response:
         """Update data source configuration."""
-        stale = self._stale(request)          # before anything changes
-        if stale is not None:
-            return stale
+        refused = self._needs_settled_bridge()
+        if refused is not None:
+            return refused
         try:
             source_name = request.match_info['name']
 
@@ -534,6 +552,9 @@ class WebServer:
     @require_permission(Permission.START_STOP)
     async def stop_source(self, request: web.Request) -> web.Response:
         """Stop a single active source."""
+        refused = self._needs_settled_bridge()
+        if refused is not None:
+            return refused
         try:
             name = request.match_info['name']
             res = await self.bridge.stop_source(name)
@@ -757,11 +778,9 @@ class WebServer:
 
 
     @require_permission(Permission.CONFIGURE)
+    @config_write
     async def update_zerobus_config(self, request: web.Request) -> web.Response:
         """Update ZeroBus configuration."""
-        stale = self._stale(request)          # before anything changes
-        if stale is not None:
-            return stale
         try:
             data = await request.json()
             if not isinstance(data, dict):
@@ -844,6 +863,16 @@ class WebServer:
             return web.json_response({'status': 'error', 'state': state,
                                       'message': f'The bridge is {state}: start it first' if state == 'stopped'
                                       else f'The bridge is {state}: wait for it'}, status=409)
+        return None
+
+    def _needs_settled_bridge(self) -> Optional[web.Response]:
+        """A source's stop, edit, addition or removal waits while the bridge starts or stops: those go through its
+        sources (a change meanwhile ended a stop half done), and a client started on a stopping bridge is never
+        stopped again. On a stopped bridge they change the configuration only."""
+        state = self.lifecycle.state
+        if state in ('starting', 'stopping'):
+            return web.json_response({'status': 'error', 'state': state, 'message': f'The bridge is {state}: wait for it'},
+                                     status=409)
         return None
 
     def _lifecycle_busy(self) -> Optional[web.Response]:
@@ -1009,11 +1038,9 @@ class WebServer:
         return web.json_response(self._settings_response(self._config_loader().load_raw()))
 
     @require_permission(Permission.CONFIGURE)
+    @config_write
     async def update_settings(self, request: web.Request) -> web.Response:
         """``{"values": {key: value}}``: saved to the file (blank: back to the default); applied at the next start."""
-        stale = self._stale(request)          # before anything changes
-        if stale is not None:
-            return stale
         try:
             data = await request.json()
         except Exception:  # noqa: BLE001 - not JSON

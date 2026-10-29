@@ -406,3 +406,30 @@ async def test_source_and_zerobus_saves_on_an_old_version_are_refused_before_any
             assert r.status == 412, (method, url, r.status, await r.text())
     assert path.read_text() == before and sorted(bridge.clients) == running
     assert next(s for s in bridge.sources if s["name"] == "sp") == sp
+
+
+# ----------------------------------------------------------------------------- second review (2026-10-29)
+
+async def test_two_saves_on_one_version_cannot_both_pass(page, monkeypatch):
+    """R2-5: the version was checked before the handler's awaits (a source edit restarts the source: seconds), so a
+    second save on the same version passed while the first one was still running, and overwrote it."""
+    import asyncio
+    from test_web_sources import EDIT
+    http, path, bridge = page
+    async with http.get("/api/sources") as r:
+        version = {"If-Match": r.headers["X-Config-Version"]}
+    update = bridge.update_source
+
+    async def slow_update(name, config):
+        await asyncio.sleep(0.3)
+        await update(name, config)
+    monkeypatch.setattr(bridge, "update_source", slow_update)
+
+    async def send(method, url, body):
+        async with http.request(method, url, json=body, headers=version) as r:
+            return r.status
+    first = asyncio.create_task(send("PUT", "/api/sources/sp", {**EDIT, "offline_after_seconds": 41}))
+    await asyncio.sleep(0.1)                                    # the source edit is restarting the source
+    second = await send("PUT", "/api/settings", {"values": {"diagnostics.group_id": "SECOND"}})
+    assert (await first, second) == (200, 412)
+    assert saved(path)["sp"]["offline_after_seconds"] == 41 and "SECOND" not in path.read_text()

@@ -264,3 +264,54 @@ async def test_the_status_says_when_the_bridge_started_and_a_restart_starts_agai
     assert (await post(http, "/api/bridge/restart"))[0] == 200
     await wait_for(lambda: server.lifecycle.state == "running" and server.bridge.running, 5)
     assert (await status(http))["bridge_started_at"] > first
+
+
+# ----------------------------------------------------------------------------- second review (2026-10-29)
+
+async def test_source_changes_wait_while_the_bridge_stops(site):
+    """R2-1: a source's Stop, Edit, Add or Delete while the bridge stops changed its sources while Bridge.stop() went
+    through them (the stop ended half done), or started a client on it. Refused until the stop is done."""
+    http, _, server = site
+    release = asyncio.Event()
+    stop = server.bridge.stop
+
+    async def slow_stop():
+        await release.wait()
+        await stop()
+    server.bridge.stop = slow_stop
+    server.lifecycle.submit("stop")
+    await wait_for(lambda: server.lifecycle.state == "stopping", 2)
+    form = {"name": "m", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1884"}
+    try:
+        for method, path, body in (("POST", "/api/sources/m/stop", {}), ("PUT", "/api/sources/m", form),
+                                   ("POST", "/api/sources", {**form, "name": "new"}), ("DELETE", "/api/sources/m", None)):
+            async with http.request(method, path, json=body) as r:
+                answer = await r.json()
+                assert r.status == 409 and answer["state"] == "stopping", (method, path, r.status, answer)
+        assert "m" in server.bridge.clients and [s["name"] for s in server.bridge.sources] == ["sp", "m"]
+    finally:
+        release.set()                                       # else the fixture's shutdown waits for the stop
+    await wait_for(lambda: server.lifecycle.state == "stopped", 5)
+
+
+async def test_the_bridge_stops_completely_when_a_source_stops_or_changes_meanwhile(started):
+    """R2-1, in the bridge: a source stopped or edited while Bridge.stop() goes through the sources (a source change
+    in progress when the Stop came); the stop finishes, and no client is started on the stopping bridge."""
+    config = {"sources": [{"name": n, "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1"} for n in "abc"]}
+    bridge = core_bridge.Bridge(config)
+    await bridge.start()
+    a = bridge.clients["a"]
+    stop_a = a.stop
+
+    async def slow_stop():
+        await asyncio.sleep(0.05)
+        await stop_a()
+    a.stop = slow_stop
+    stopping = asyncio.create_task(bridge.stop())
+    await asyncio.sleep(0.01)                               # Bridge.stop() waits on source a
+    await bridge.stop_source("b")
+    await bridge.update_source("c", {**config["sources"][2], "endpoint": "mqtt://127.0.0.1:2"})
+    await stopping
+    assert not bridge.running and bridge.clients == {} and bridge.client_tasks == {}
+    assert [name for name, _ in started] == ["a", "b", "c"]                     # c not started again
+    assert bridge.sources[2]["endpoint"] == "mqtt://127.0.0.1:2"               # the edit applies at the next start

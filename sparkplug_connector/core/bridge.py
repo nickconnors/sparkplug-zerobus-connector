@@ -391,6 +391,8 @@ class Bridge:
             source_config: Source configuration dict
         """
         source_name = source_config.get('name', 'unknown')
+        if self._shutdown:      # stopping (or stopped): nothing would stop this client again
+            raise RuntimeError(f"The bridge is stopping: source {source_name} not started")
         source_tables.target_config(source_config, self.zerobus_config)   # ValueError: target_table malformed
         await self._ensure_target(source_config)
 
@@ -746,8 +748,9 @@ class Bridge:
         if self.host_tasks:
             await asyncio.gather(*self.host_tasks.values(), return_exceptions=True)
 
-        # Stop all source clients (a primary host publishes OFFLINE first, so the edges start buffering)
-        for source_name, client in self.clients.items():
+        # Stop all source clients (a primary host publishes OFFLINE first, so the edges start buffering); copies: a
+        # source's stop or edit in progress changes them meanwhile
+        for source_name, client in list(self.clients.items()):
             try:
                 logger.info(f"Stopping source: {source_name}")
                 await client.stop()
@@ -761,7 +764,7 @@ class Bridge:
             for task in pending:
                 task.cancel()
             await asyncio.gather(*self.client_tasks.values(), return_exceptions=True)
-        for source_name, client in self.clients.items():
+        for source_name, client in list(self.clients.items()):
             try:
                 await client.close()
             except Exception as e:
@@ -783,7 +786,7 @@ class Bridge:
         for wal in self.wals.values():
             wal.close()
 
-        for notifier in self.birth_notifiers.values():
+        for notifier in list(self.birth_notifiers.values()):
             await notifier.stop()
 
         # for good: a start after a stop is a new Bridge (core/lifecycle.py); no source is shown running
@@ -971,6 +974,9 @@ class Bridge:
         self._source_queues.pop(source_name, None)
         old = self.sources[index]
         self.sources[index] = source_config
+        if was_active and self._shutdown:
+            logger.info(f"✓ Source '{source_name}' updated; the bridge is stopping: it applies at the next start")
+            return
         if was_active and source_config.get('enabled', True):
             try:
                 await self._start_client(source_config)
