@@ -225,6 +225,8 @@ async def test_the_bridge_is_stopped_started_and_restarted_from_the_pages(tab):
     await field.fill("4")
     await t.get_by_role("button", name="Review and save…").click()
     await t.locator("dialog[open]").get_by_role("button", name="Save and restart").click()
+    # the save's own answer first (the banner never shows on this path: waiting for it hidden proves nothing)
+    await playwright_api.expect(t.locator(".toast", has_text="The bridge is restarting")).to_be_visible()
     banner = t.locator(".banner")
     await playwright_api.expect(banner).to_be_hidden()
     assert yaml.safe_load(path.read_text())["zerobus"]["drain_timeout_seconds"] == 4
