@@ -448,3 +448,60 @@ async def test_the_rebirth_api_asks_the_source_for_an_ncmd(page):
         assert r.status == 400
     async with http.post("/api/sources/nope/rebirth", json={"group_id": "G", "edge_node_id": "E"}) as r:
         assert r.status == 404
+
+
+# ----------------------------------------------------------------------------- the password variable's default (2026-10-29)
+
+async def test_a_source_with_a_username_and_no_password_variable_reads_the_standard_one(page, started, monkeypatch):
+    """In the Azure test a source added on the page with the Password variable left empty (its placeholder,
+    SPARKPLUG_MQTT_PASSWORD, looked filled in) logged in without a password. An empty field now means that
+    variable, the one the example configuration and the README use; not set in the environment: still none."""
+    monkeypatch.setenv("SPARKPLUG_MQTT_PASSWORD", "from-the-env")
+    http, path, bridge = page
+    form = {"name": "chariot", "protocol": "sparkplug", "endpoint": "mqtt://10.0.0.12:1883", "username": "pyconnector",
+            "enabled": True}
+    async with http.post("/api/sources", json=form) as r:
+        assert r.status == 200, await r.text()
+    assert saved(path)["chariot"]["password"] == "${env:SPARKPLUG_MQTT_PASSWORD:}"
+    assert running(bridge, "chariot")["password"] == "from-the-env" and started[-1][1]["password"] == "from-the-env"
+
+    async with http.put("/api/sources/chariot", json={**form, "password": ""}) as r:       # the field cleared
+        assert r.status == 200, await r.text()
+    assert saved(path)["chariot"]["password"] == "${env:SPARKPLUG_MQTT_PASSWORD:}"
+    assert started[-1][1]["password"] == "from-the-env"
+
+    async with http.put("/api/sources/chariot", json={**form, "password": "${env:OTHER_PASSWORD}"}) as r:
+        assert r.status == 200, await r.text()
+    assert saved(path)["chariot"]["password"] == "${env:OTHER_PASSWORD}"            # a variable given: that one
+
+
+async def test_a_source_saved_earlier_without_a_password_gets_the_default_on_its_next_edit(page, started, monkeypatch):
+    monkeypatch.setenv("SPARKPLUG_MQTT_PASSWORD", "from-the-env")
+    http, path, bridge = page
+    raw = yaml.safe_load(path.read_text())
+    raw["sources"].append({"name": "old", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883",
+                           "username": "pyconnector", "enabled": False})
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    bridge.sources.append(dict(raw["sources"][-1]))
+    async with http.put("/api/sources/old", json={"name": "old", "protocol": "sparkplug",
+                                                  "endpoint": "mqtt://localhost:1883", "keepalive": 30}) as r:
+        assert r.status == 200, await r.text()
+    assert saved(path)["old"]["password"] == "${env:SPARKPLUG_MQTT_PASSWORD:}"
+
+
+async def test_without_a_username_or_with_a_tls_password_no_default_is_added(page, monkeypatch):
+    monkeypatch.setenv("SPARKPLUG_MQTT_PASSWORD", "from-the-env")
+    http, path, bridge = page
+    async with http.post("/api/sources", json={"name": "anon", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883",
+                                               "enabled": False}) as r:
+        assert r.status == 200, await r.text()
+    assert "password" not in saved(path)["anon"]                                    # a server without login
+    raw = yaml.safe_load(path.read_text())                                          # (the TLS password: file only)
+    raw["sources"].append({"name": "tls", "protocol": "sparkplug", "endpoint": "mqtts://localhost:8883", "username": "u",
+                           "security": {"password": "${env:SPTEST_PASSWORD}"}, "enabled": False})
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    bridge.sources.append({**raw["sources"][-1], "security": {"password": "s3cret"}})
+    async with http.put("/api/sources/tls", json={"name": "tls", "protocol": "sparkplug",
+                                                  "endpoint": "mqtts://localhost:8883", "keepalive": 30}) as r:
+        assert r.status == 200, await r.text()
+    assert "password" not in saved(path)["tls"]

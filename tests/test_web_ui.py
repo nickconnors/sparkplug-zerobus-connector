@@ -330,11 +330,14 @@ async def test_the_page_sees_the_passwords_variable_and_whether_it_is_set(page, 
     assert (sp["password_env"], sp["password_env_set"]) == ("SPTEST_PASSWORD", False)
 
 
-async def test_removing_the_variable_removes_the_password(page):
+async def test_removing_the_variable_means_the_standard_one_and_without_it_no_password(page, monkeypatch):
+    """(Since 2026-10-29: an empty Password variable is SPARKPLUG_MQTT_PASSWORD, test_web_sources.) Not set in the
+    environment: no password."""
+    monkeypatch.delenv("SPARKPLUG_MQTT_PASSWORD", raising=False)
     http, path, bridge = page
     async with http.put("/api/sources/sp", json={**SP, "password": ""}) as r:
         assert r.status == 200
-    assert "password" not in saved(path)["sp"] and not running(bridge, "sp").get("password")
+    assert saved(path)["sp"]["password"] == "${env:SPARKPLUG_MQTT_PASSWORD:}" and not running(bridge, "sp").get("password")
 
 
 async def test_a_typed_env_placeholder_stays_one_in_the_file(page, monkeypatch):
