@@ -85,8 +85,9 @@ body { margin: 0; background: var(--pico-background-color); }
 .sidebar-foot { margin-top: auto; padding: 0 .5rem; color: var(--pico-muted-color); font-size: .75rem; }
 
 .main-col { display: flex; flex-direction: column; min-width: 0; }
+.page-top { position: sticky; top: 0; z-index: 5; }    /* the top bar and the restart banner, in view when scrolled */
 .topbar {
-  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .75rem;
+  display: flex; align-items: center; gap: .75rem;
   padding: .7rem 1.5rem; border-bottom: 1px solid var(--pico-muted-border-color); background: var(--pico-background-color);
 }
 .topbar h1 { margin: 0; font-size: 1.2rem; }

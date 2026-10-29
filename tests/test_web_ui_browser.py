@@ -275,3 +275,23 @@ async def test_the_sign_in_button_is_centred_on_the_login_page(tab):
     assert abs((button["x"] + button["width"] / 2) - (card["x"] + card["width"] / 2)) <= 1
     assert button["width"] < card["width"]                     # a button, not a full-width bar
     assert t.errors == []
+
+
+async def test_the_restart_banner_stays_in_view_after_a_save_at_the_bottom(tab):
+    """The Settings page is long: its Save is at the bottom, where the banner (under the top bar) was out of view."""
+    t, _, _ = tab
+    await t.set_viewport_size({"width": 1280, "height": 700})
+    await t.goto("/settings.html")
+    await t.get_by_role("button", name="Expand all").click()
+    field = t.locator('[id="zerobus.drain_timeout_seconds"]')
+    await field.fill("9")
+    review = t.get_by_role("button", name="Review and save…")
+    await review.scroll_into_view_if_needed()
+    await review.click()
+    await t.locator("dialog[open]").get_by_role("button", name="Save", exact=True).click()
+    banner = t.locator(".banner")
+    await playwright_api.expect(banner).to_be_visible()
+    assert await t.evaluate("window.scrollY") > 0                              # still scrolled down
+    box = await banner.bounding_box()
+    assert 0 <= box["y"] and box["y"] + box["height"] <= 700, box             # inside the window
+    assert t.errors == []

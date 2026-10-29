@@ -76,6 +76,7 @@
       + '  <div class="sidebar-foot"><small>Sparkplug B to Databricks through Zerobus</small></div>'
       + '</aside>'
       + '<div class="main-col">'
+      + '  <div class="page-top">'                 // sticky: the top bar and the restart banner stay in view
       + '  <header class="topbar">'
       + '    <h1>' + current.label + '</h1>'
       + '    <span class="pill" :class="stateClass" x-text="stateLabel" :title="stateTitle"></span>'
@@ -90,6 +91,7 @@
       + '    ' + svg('alert') + '<span>Saved settings take effect when the bridge restarts.</span>'
       + '    <button type="button" class="small" x-show="canRestart" @click="restartNow" :aria-busy="restarting" :disabled="restarting">'
       + '      ' + svg('restart') + 'Restart now</button>'
+      + '  </div>'
       + '  </div>'
       + '</div>';
     document.body.insertBefore(shell, document.body.firstChild);
