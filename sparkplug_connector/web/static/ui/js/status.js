@@ -40,8 +40,9 @@ document.addEventListener('alpine:init', () => {
     get canStartBridge() { return this.status.bridge_state === 'stopped'; },
     get canStopBridge() { return this.status.bridge_state === 'running'; },
 
-    get rowsWrittenCount() {
-      return Object.values(this.health).map((h) => h.rows_written || 0).reduce((a, b) => a + b, 0);
+    get rowsWrittenCount() {   // per table: a source's rows_written is its table's, shared with the table's other sources
+      const writers = (this.status.metrics || {}).zerobus_targets || {};
+      return Object.values(writers).map((w) => w.written || 0).reduce((a, b) => a + b, 0);
     },
     get rowsWritten() { return window.fmt.compact(this.rowsWrittenCount); },
     get rowsWrittenExact() { return window.fmt.number(this.rowsWrittenCount); },

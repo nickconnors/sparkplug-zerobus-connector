@@ -789,10 +789,13 @@ class Bridge:
         for notifier in list(self.birth_notifiers.values()):
             await notifier.stop()
 
-        # for good: a start after a stop is a new Bridge (core/lifecycle.py); no source is shown running
+        # for good: a start after a stop is a new Bridge (core/lifecycle.py); no source is shown running, nor Zerobus
+        # (the writers stay, for their final counts)
         self.clients.clear()
         self.client_tasks.clear()
         self.host_tasks.clear()
+        self.tables.clear()
+        self.zerobus_enabled = False
         self.running = False
         logger.info("✓ Bridge stopped")
 

@@ -302,17 +302,11 @@ async def test_big_counters_are_compact_on_the_tiles_and_exact_on_hover(tab):
     import json
     t, _, _ = tab
 
-    async def health(route):
-        body = json.loads(await (await route.fetch()).text())
-        for h in body.values():
-            h["rows_written"] = 3_153_600_000 // max(len(body), 1)
-        await route.fulfill(json=body)
-
     async def status(route):
         body = json.loads(await (await route.fetch()).text())
         body.update(backpressure_queue_size=950, bridge_started_at=1793223055026)
+        body["metrics"]["zerobus_targets"] = {"w.c.s.sparkplug_raw": {"written": 3_153_600_000}}
         await route.fulfill(json=body)
-    await t.route("**/api/sparkplug/health", health)
     await t.route("**/api/status", status)
     await t.goto("/")
     rows = t.locator(".tile", has_text="Rows written")
@@ -321,6 +315,30 @@ async def test_big_counters_are_compact_on_the_tiles_and_exact_on_hover(tab):
     await playwright_api.expect(t.locator(".tile", has_text="Queued").locator(".value")).to_have_text("950")
     await playwright_api.expect(rows.locator(".sub")).to_contain_text("since the bridge started, ")
     assert "2026" in await rows.locator(".sub").inner_text()
+    assert t.errors == []
+
+
+async def test_rows_written_counts_a_table_shared_by_sources_once(tab):
+    """R2-2: each source's rows_written is its table's writer's total, and the tile summed them: two sources on one
+    table counted it twice. The tile sums the tables' writers."""
+    import json
+    t, _, _ = tab
+
+    async def health(route):
+        body = json.loads(await (await route.fetch()).text())
+        assert len(body) == 2                                       # sp and m, on one table
+        for h in body.values():
+            h["rows_written"] = 700
+        await route.fulfill(json=body)
+
+    async def status(route):
+        body = json.loads(await (await route.fetch()).text())
+        body["metrics"]["zerobus_targets"] = {"w.c.s.sparkplug_raw": {"written": 700}}
+        await route.fulfill(json=body)
+    await t.route("**/api/sparkplug/health", health)
+    await t.route("**/api/status", status)
+    await t.goto("/")
+    await playwright_api.expect(t.locator(".tile", has_text="Rows written").locator(".value")).to_have_text("700")
     assert t.errors == []
 
 

@@ -315,3 +315,19 @@ async def test_the_bridge_stops_completely_when_a_source_stops_or_changes_meanwh
     assert not bridge.running and bridge.clients == {} and bridge.client_tasks == {}
     assert [name for name, _ in started] == ["a", "b", "c"]                     # c not started again
     assert bridge.sources[2]["endpoint"] == "mqtt://127.0.0.1:2"               # the edit applies at the next start
+
+
+async def test_after_a_stop_the_status_says_zerobus_is_off_and_keeps_the_final_counts(tmp_path, acked):
+    """R2-4: after Stop the status still said Zerobus on and connected, with the old tables."""
+    config = bridge_config(tmp_path)
+    bridge = core_bridge.Bridge(config)
+    await bridge.start_infra()
+    s = bridge.get_status()
+    assert s["zerobus_enabled"] and s["zerobus_connected"] and len(s["zerobus_targets"]) == 1
+    for r in rows("A", 3):
+        bridge._on_record(r)
+    await wait_for(lambda: len(written(acked)) == 3, 5)
+    await bridge.stop()
+    s = bridge.get_status()
+    assert (s["zerobus_enabled"], s["zerobus_connected"], s["zerobus_targets"]) == (False, False, [])
+    assert [w["written"] for w in s["metrics"]["zerobus_targets"].values()] == [3]     # the writer's final count
