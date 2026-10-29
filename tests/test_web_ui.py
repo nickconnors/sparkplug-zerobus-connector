@@ -459,3 +459,24 @@ async def test_a_symlinked_store_entry_is_refused_not_an_error(page, tmp_path):
     async with http.delete("/api/certs/link.pem") as r:
         assert r.status == 400, await r.text()
     assert outside.read_text() == "kept" and (store / "link.pem").is_symlink()
+
+
+def test_the_config_version_is_hashed_again_only_when_the_file_changed(tmp_path, monkeypatch):
+    """R2-7: every /api answer read and hashed the whole file (each tab polls every 3 s)."""
+    import pathlib
+    from sparkplug_connector.web.web_server import WebServer
+    path = tmp_path / "connector.yaml"
+    path.write_text("a: 1\n")
+    server = WebServer(config={}, bridge=None, config_path=path)
+    reads = []
+    read_bytes = pathlib.Path.read_bytes
+    monkeypatch.setattr(pathlib.Path, "read_bytes", lambda self: reads.append(self) or read_bytes(self))
+    first = server.config_version()
+    assert server.config_version() == first and len(reads) == 1
+    path.write_text("a: 2\n")                                            # the same size, another time
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+    second = server.config_version()
+    assert second != first and len(reads) == 2
+    path.write_text("a: 22\n")
+    assert server.config_version() not in (first, second) and len(reads) == 3

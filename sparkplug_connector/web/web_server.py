@@ -240,6 +240,8 @@ class WebServer:
         self.ssl_context = None
         self.restart_required = False       # settings saved that apply at the next start
         self._config_lock = asyncio.Lock()  # the configuration file's changes, one at a time (config_write)
+        self._config_file: Optional[Path] = None
+        self._version: Optional[tuple] = None      # ((inode, mtime_ns, size), version) of the file's last hash
         self.read_only = str(web_ui_config.get('read_only', False)).strip().lower() in ('true', '1', 'yes', 'on')
 
     async def start(self):
@@ -1011,12 +1013,19 @@ class WebServer:
 
     def config_version(self) -> str:
         """The configuration file's version (a hash of its bytes): the page sends it back with a save (If-Match), so
-        a save made on what another save has replaced meanwhile is refused instead of overwriting it."""
+        a save made on what another save has replaced meanwhile is refused instead of overwriting it. Hashed again
+        only when the file changed (every /api answer carries it)."""
+        if self._config_file is None:
+            self._config_file = self._config_loader().config_path
         try:
-            data = self._config_loader().config_path.read_bytes()
+            st = self._config_file.stat()
+            key = (st.st_ino, st.st_mtime_ns, st.st_size)
+            if self._version is None or self._version[0] != key:
+                self._version = (key, hashlib.sha256(self._config_file.read_bytes()).hexdigest()[:16])
+            return self._version[1]
         except OSError:
-            data = b''
-        return hashlib.sha256(data).hexdigest()[:16]
+            self._version = None
+            return hashlib.sha256(b'').hexdigest()[:16]
 
     def _stale(self, request: web.Request) -> Optional[web.Response]:
         """412 when the save's If-Match isn't the file's version any more (no If-Match, e.g. curl: no check)."""
