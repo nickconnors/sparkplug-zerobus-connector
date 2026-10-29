@@ -1099,7 +1099,11 @@ class WebServer:
     @require_permission(Permission.DELETE)
     async def delete_cert(self, request: web.Request) -> web.Response:
         name = request.match_info['name']
-        if not self._cert_store().delete(name):
+        try:
+            deleted = self._cert_store().delete(name)
+        except CertError as e:
+            return web.json_response({'status': 'error', 'message': str(e)}, status=e.status)
+        if not deleted:
             return web.json_response({'status': 'error', 'message': f'No file named {name}'}, status=404)
         return web.json_response({'status': 'ok', 'message': f'Deleted {name}'})
 

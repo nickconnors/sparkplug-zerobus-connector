@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from test_web_sources import page, running, saved, started  # noqa: F401 - page, started: fixtures
-from sparkplug_connector.core.cert_store import CertStore, resolve_tls_paths, used_by
+from sparkplug_connector.core.cert_store import CertError, CertStore, resolve_tls_paths, used_by
 from sparkplug_connector.web.web_server import UI_DIR, UI_PAGES
 
 SP = {"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://localhost:1883"}
@@ -259,13 +259,14 @@ async def test_certificates_upload_replace_list_delete(page, tmp_path):
 def test_tls_file_names_resolve_in_the_store(tmp_path):
     source = {"name": "sp", "security": {"ca_cert_path": "ca.pem", "client_cert_path": "/etc/certs/c.pem",
                                          "client_key_path": "keys/k.pem", "check_hostname": False}}
+    (tmp_path / "ca.pem").write_text("ca")                                     # uploaded
     resolved = resolve_tls_paths(source, tmp_path)
     assert resolved["security"] == {"ca_cert_path": str(tmp_path / "ca.pem"), "client_cert_path": "/etc/certs/c.pem",
                                     "client_key_path": "keys/k.pem", "check_hostname": False}
     assert source["security"]["ca_cert_path"] == "ca.pem"                       # the config itself unchanged
     assert resolve_tls_paths({"name": "x"}, tmp_path) == {"name": "x"}
     assert used_by([source, {"name": "y"}], "ca.pem") == ["sp"] and used_by([source], "k.pem") == []
-    with pytest.raises(ValueError):
+    with pytest.raises(CertError):
         CertStore(tmp_path).path("../x")
 
 
@@ -273,6 +274,8 @@ def test_tls_file_names_resolve_in_the_store(tmp_path):
 
 async def test_the_dialogs_connection_fields_are_saved_and_the_tls_file_is_resolved(page, started, tmp_path):
     http, path, bridge = page
+    async with http.post("/api/certs", data=_upload("plant-ca.pem", b"-----BEGIN CERTIFICATE-----\n")) as r:
+        assert r.status == 200                                              # in the store: resolved there
     edit = {**SP, "username": "plant", "keepalive": 30, "topics": ["spBv1.0/Plant1/#", "spBv1.0/STATE/#"],
             "security": {"ca_cert_path": "plant-ca.pem", "client_cert_path": "", "client_key_path": "",
                          "check_hostname": True}}
@@ -433,3 +436,26 @@ async def test_two_saves_on_one_version_cannot_both_pass(page, monkeypatch):
     second = await send("PUT", "/api/settings", {"values": {"diagnostics.group_id": "SECOND"}})
     assert (await first, second) == (200, 412)
     assert saved(path)["sp"]["offline_after_seconds"] == 41 and "SECOND" not in path.read_text()
+
+
+def test_a_tls_file_name_not_in_the_store_stays_as_written(tmp_path):
+    """R2-3: before the store, ``ca.pem`` meant ./ca.pem; a configuration written so must work after the upgrade."""
+    source = {"name": "sp", "security": {"ca_cert_path": "ca.pem", "client_key_path": "k.pem"}}
+    (tmp_path / "k.pem").write_text("key")
+    assert resolve_tls_paths(source, tmp_path)["security"] == {"ca_cert_path": "ca.pem",
+                                                               "client_key_path": str(tmp_path / "k.pem")}
+
+
+async def test_a_symlinked_store_entry_is_refused_not_an_error(page, tmp_path):
+    """R2-10: a name whose entry is a symlink out of the store: the upload and the delete answered 500."""
+    http, _, _ = page
+    store = tmp_path / ".sparkplug_connector" / "certs"                 # HOME is tmp_path
+    store.mkdir(parents=True)
+    outside = tmp_path / "outside.pem"
+    outside.write_text("kept")
+    (store / "link.pem").symlink_to(outside)
+    async with http.post("/api/certs?overwrite=true", data=_upload("link.pem", b"new")) as r:
+        assert r.status == 400, await r.text()
+    async with http.delete("/api/certs/link.pem") as r:
+        assert r.status == 400, await r.text()
+    assert outside.read_text() == "kept" and (store / "link.pem").is_symlink()

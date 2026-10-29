@@ -1,7 +1,8 @@
 """The certificates and keys the web page uploads (``web_ui.certs_dir``, default ``~/.sparkplug_connector/certs``).
 
 A source's TLS paths (``security.ca_cert_path``, ``client_cert_path``, ``client_key_path``) may name a file here by its
-bare name (no directory); ``resolve_tls_paths`` turns those into paths before the source starts. Names: letters,
+bare name (no directory); ``resolve_tls_paths`` turns those into paths before the source starts (a bare name with no
+file here stays as written: a path from the working directory, as before the store). Names: letters,
 digits, ``_`` and ``-``, with at most one ``.`` that is neither first nor last (so no path can be built from one);
 at most 1 MB a file; written atomically with mode 0600.
 """
@@ -61,12 +62,13 @@ class CertStore:
         return sorted(files, key=lambda f: f.name.lower())
 
     def path(self, name: str) -> Path:
-        """The file for a valid name, inside the directory (ValueError otherwise)."""
+        """The file for a valid name, inside the directory (CertError 400 otherwise, e.g. an entry that is a symlink
+        out of it)."""
         if not valid_name(name):
-            raise ValueError(f"invalid file name: {name!r}")
+            raise CertError(400, f"Invalid file name: {name!r}")
         path = (self.dir / name).resolve()
         if path.parent != self.dir:
-            raise ValueError(f"invalid file name: {name!r}")
+            raise CertError(400, f"{name} is not a file of the store (a link out of {self.dir}?): change it there.")
         return path
 
     def save(self, name: str, content: bytes, overwrite: bool) -> CertFile:
@@ -114,7 +116,8 @@ def used_by(sources: list[dict[str, Any]], name: str) -> list[str]:
 
 
 def resolve_tls_paths(source: dict[str, Any], directory: Path) -> dict[str, Any]:
-    """The source with each TLS path that is a bare file name made a path in the store (others unchanged)."""
+    """The source with each TLS path that is a bare file name of a file in the store made its path there (others
+    unchanged: ``ca.pem`` with no such file in the store stays ./ca.pem)."""
     security = source.get("security")
     if not isinstance(security, dict):
         return source
@@ -122,5 +125,7 @@ def resolve_tls_paths(source: dict[str, Any], directory: Path) -> dict[str, Any]
     for key in TLS_PATH_KEYS:
         value = security.get(key)
         if isinstance(value, str) and valid_name(value.strip()):
-            resolved[key] = str(Path(directory).expanduser() / value.strip())
+            path = Path(directory).expanduser() / value.strip()
+            if path.is_file():
+                resolved[key] = str(path)
     return {**source, "security": resolved}

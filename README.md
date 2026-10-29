@@ -182,7 +182,7 @@ py -3.12 -m venv .venv
   after a save. (Environment variables still need the connector itself restarted.)
 - **Certificates**: upload, replace and delete the MQTT TLS files (`web_ui.certs_dir`, default
   `~/.sparkplug_connector/certs`; in Docker, mount a volume there). A source's TLS path that is a bare file name is
-  read from this directory.
+  read from this directory when the file is there (else from the working directory, as written).
 
 A save goes to the file the connector was started with (`--config`): fields the page doesn't show stay as written
 there; a form's save made after another save (or an edit of the file) changed it since the form loaded is refused
