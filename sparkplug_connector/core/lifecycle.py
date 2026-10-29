@@ -31,11 +31,15 @@ class BridgeLifecycle:
         self._used = False              # the current bridge was stopped: it can't run again
         self._state: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
+        self._pending: Optional[str] = None     # submitted, its task not done (busy before it takes the lock)
+        self._closing = False                   # shutdown began: nothing starts any more
 
     @property
     def state(self) -> str:
         if self._state is not None:
             return self._state
+        if self._pending is not None:
+            return STARTING if self._pending == "start" else STOPPING
         if self._used:
             return STOPPED
         if self.bridge.running:
@@ -47,7 +51,7 @@ class BridgeLifecycle:
 
     @property
     def busy(self) -> bool:
-        return self._lock.locked()
+        return self._lock.locked() or self._pending is not None
 
     async def start(self) -> None:
         """The bridge and its enabled sources; a new bridge from the file if the current one was stopped."""
@@ -66,9 +70,12 @@ class BridgeLifecycle:
 
     def submit(self, action: str) -> asyncio.Task:
         """``start``/``stop``/``restart`` in the background (the page polls the state); one at a time."""
+        self._pending = action                  # a second request in the same loop turn sees it busy
         task = asyncio.create_task(getattr(self, action)())
 
         def done(t: asyncio.Task) -> None:
+            if self._task is t:
+                self._pending = None
             if not t.cancelled() and t.exception() is not None:
                 logger.error("Bridge %s failed: %s", action, t.exception())
         task.add_done_callback(done)
@@ -77,7 +84,9 @@ class BridgeLifecycle:
 
     async def shutdown(self) -> None:
         """The connector exits: stop the bridge unless it was stopped already. A start in progress is cancelled
-        (its stop cleans up what it started); a stop in progress finishes its drain first."""
+        (its stop cleans up what it started); a stop in progress finishes its drain first, and a restart's start
+        doesn't follow it (no sources connecting just to be stopped again)."""
+        self._closing = True
         if self._task is not None and not self._task.done():
             if self.state == STARTING:
                 self._task.cancel()
@@ -87,7 +96,7 @@ class BridgeLifecycle:
                 await self._stop()
 
     async def _start(self) -> None:
-        if self.bridge.running and not self._used:
+        if self._closing or (self.bridge.running and not self._used):
             return
         if self._used:
             config = self._load_config()

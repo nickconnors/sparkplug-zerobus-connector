@@ -429,6 +429,9 @@ class WebServer:
     @require_permission(Permission.START_STOP)
     async def start_source(self, request: web.Request) -> web.Response:
         """Start a single configured source."""
+        refused = self._needs_running_bridge()
+        if refused is not None:
+            return refused
         try:
             name = request.match_info['name']
             res = await self.bridge.start_source(name)
@@ -739,6 +742,16 @@ class WebServer:
         self.bridge, self.config = bridge, config
         self.restart_required = False
 
+    def _needs_running_bridge(self) -> Optional[web.Response]:
+        """Zerobus and source actions act on the running bridge: a stopped one is for good (writers or sources
+        started on it would never be stopped again), a starting or stopping one is in the middle of it."""
+        state = self.lifecycle.state
+        if state != 'running':
+            return web.json_response({'status': 'error', 'state': state,
+                                      'message': f'The bridge is {state}: start it first' if state == 'stopped'
+                                      else f'The bridge is {state}: wait for it'}, status=409)
+        return None
+
     def _lifecycle_busy(self) -> Optional[web.Response]:
         if self.lifecycle.busy:
             return web.json_response({'status': 'error', 'message': f'The bridge is {self.lifecycle.state}: wait for it',
@@ -780,6 +793,9 @@ class WebServer:
     @require_permission(Permission.START_STOP)
     async def start_zerobus(self, request: web.Request) -> web.Response:
         """Start ZeroBus streaming."""
+        refused = self._needs_running_bridge()
+        if refused is not None:
+            return refused
         try:
             result = await self.bridge.start_zerobus()
             return web.json_response(result)
@@ -790,6 +806,9 @@ class WebServer:
     @require_permission(Permission.START_STOP)
     async def stop_zerobus(self, request: web.Request) -> web.Response:
         """Stop ZeroBus streaming."""
+        refused = self._needs_running_bridge()
+        if refused is not None:
+            return refused
         try:
             result = await self.bridge.stop_zerobus()
             return web.json_response(result)

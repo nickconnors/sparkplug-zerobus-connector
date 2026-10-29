@@ -171,8 +171,84 @@ async def test_the_shutdown_cancels_a_start_in_progress_then_stops_once():
     events: list = []
     lifecycle = BridgeLifecycle(FakeBridge(events, gate=asyncio.Event()), load_config=dict)
     task = lifecycle.submit("start")
-    await wait_for(lambda: lifecycle.state == "starting", 2)
+    await wait_for(lambda: events, 2)                       # the bridge's start is running (waiting at its gate)
+    assert lifecycle.state == "starting"
     await lifecycle.shutdown()
     assert task.cancelled() and [e[0] for e in events] == ["start", "stop", "stopped"]
     await lifecycle.shutdown()                              # already stopped: nothing more
     assert [e[0] for e in events] == ["start", "stop", "stopped"] and lifecycle.state == "stopped"
+
+
+# ----------------------------------------------------------------------------- review findings (2026-10-28)
+
+async def test_zerobus_and_source_actions_wait_for_a_running_bridge(site):
+    """A stopped bridge is for good: the Zerobus page's Stop/Start or a source's Start would revive writers on it
+    (on its closed write-ahead logs) that nothing stops again. Refused until the bridge is started."""
+    http, _, server = site
+    assert (await post(http, "/api/bridge/stop"))[0] == 200
+    for path in ("/api/zerobus/stop", "/api/zerobus/start", "/api/sources/sp/start"):
+        code, body = await post(http, path)
+        assert code == 409 and "stopped" in body["message"], (path, code, body)
+    assert server.bridge.writer_tasks == {} and server.bridge.clients == {}
+
+
+async def test_a_stopped_bridge_opens_no_writer_again(tmp_path, acked):
+    config = bridge_config(tmp_path)
+    lifecycle = BridgeLifecycle(core_bridge.Bridge(config), load_config=lambda: config)
+    await lifecycle.bridge.start_infra()
+    await lifecycle.stop()
+    bridge = lifecycle.bridge
+    assert (await bridge.stop_zerobus())["status"] == "error"
+    assert (await bridge.start_zerobus())["status"] == "error"
+    assert all(t.done() for t in bridge.writer_tasks.values())
+
+
+async def test_an_action_is_busy_from_the_moment_it_is_submitted():
+    """A double click: two requests in one event-loop turn; the second must see the first as busy, though its task
+    hasn't taken the lock yet."""
+    events: list = []
+    lifecycle = BridgeLifecycle(FakeBridge(events), load_config=dict, make_bridge=lambda c: FakeBridge(events))
+    await lifecycle.start()
+    task = lifecycle.submit("restart")
+    assert lifecycle.busy and lifecycle.state == "stopping"     # nothing has run yet
+    await task
+    assert not lifecycle.busy and lifecycle.state == "running"
+
+
+async def test_the_answer_to_start_and_restart_has_the_new_state(site):
+    http, _, _ = site
+    code, body = await post(http, "/api/bridge/restart")
+    assert code == 200 and body["state"] == "stopping"
+    await wait_for(lambda: site[2].lifecycle.state == "running", 5)
+    assert (await post(http, "/api/bridge/stop"))[0] == 200
+    code, body = await post(http, "/api/bridge/start")
+    assert code == 200 and body["state"] == "starting"
+
+
+async def test_the_shutdown_during_a_restart_s_drain_starts_no_new_bridge():
+    """SIGTERM while a restart drains: the restart's stop finishes, its start doesn't run (no sources connecting
+    and going ONLINE just to be stopped again)."""
+    events: list = []
+    made = []
+
+    def make(config):
+        made.append(FakeBridge(events))
+        return made[-1]
+    first = FakeBridge(events)
+    lifecycle = BridgeLifecycle(first, load_config=dict, make_bridge=make)
+    await lifecycle.start()
+    gate = asyncio.Event()
+    stop = first.stop
+
+    async def slow_stop():
+        await gate.wait()
+        await stop()
+    first.stop = slow_stop
+    lifecycle.submit("restart")
+    await wait_for(lambda: lifecycle.state == "stopping", 2)
+    shutting = asyncio.create_task(lifecycle.shutdown())
+    await asyncio.sleep(0.05)
+    gate.set()
+    await shutting
+    assert made == [] and [e[0] for e in events] == ["start", "started", "stop", "stopped"]
+    assert lifecycle.state == "stopped"

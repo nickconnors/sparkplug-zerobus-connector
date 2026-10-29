@@ -987,6 +987,8 @@ class Bridge:
         Returns:
             dict: Status message with success/error
         """
+        if self._shutdown:                      # stopped for good: its writers would never be stopped again
+            return {'status': 'error', 'message': 'The bridge is stopped: start it first'}
         try:
             if self.zerobus_enabled and self.tables:
                 return {'status': 'ok', 'message': 'ZeroBus already enabled'}
@@ -1008,6 +1010,8 @@ class Bridge:
         Returns:
             dict: Status message with success/error
         """
+        if self._shutdown:
+            return {'status': 'error', 'message': 'The bridge is stopped: start it first'}
         try:
             if not self.zerobus_enabled:
                 return {'status': 'ok', 'message': 'ZeroBus already disabled'}
