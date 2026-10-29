@@ -15,6 +15,7 @@ web_ui:
   enabled: true
   host: 0.0.0.0
   port: 8001
+  read_only: false                 # true: the page shows the status only, every change through it is refused
   allowed_origins: []              # behind a reverse proxy that rewrites Host: the page's public URL(s), e.g.
                                    # [https://connector.example.com] (README: Behind a reverse proxy)
   authentication:                  # login to the web page, off by default

@@ -3,6 +3,7 @@ certificate store and its use by the sources, and the source fields the Sources 
 keep-alive, topics, TLS files)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import stat
@@ -116,9 +117,10 @@ def test_an_allowed_origin_that_isnt_one_is_ignored_and_logged(caplog):
     assert caplog.text.count("web_ui.allowed_origins") == 3
 
 
-@pytest.fixture
-async def proxied(tmp_path, monkeypatch, started):
-    """The web server on a config with web_ui.allowed_origins, as behind nginx with its default Host rewrite."""
+@contextlib.asynccontextmanager
+async def page_with(tmp_path, monkeypatch, **web_ui):
+    """The web server (bridge running, sources that never connect: the ``started`` fixture) on test_web_sources'
+    config with these ``web_ui`` settings; yields (http session, port, server)."""
     import socket
     from test_web_sources import CONFIG
     from sparkplug_connector.core import bridge as core_bridge
@@ -130,7 +132,7 @@ async def proxied(tmp_path, monkeypatch, started):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     raw = yaml.safe_load(CONFIG.format(port=port))
-    raw["web_ui"]["allowed_origins"] = [PUBLIC]
+    raw["web_ui"].update(web_ui)
     path = tmp_path / "connector.yaml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False))
     config = ConfigLoader(config_path=path).load()
@@ -138,10 +140,19 @@ async def proxied(tmp_path, monkeypatch, started):
     await bridge.start()
     server = WebServer(config=config, bridge=bridge, config_path=path)
     await server.start()
-    async with aiohttp.ClientSession(f"http://127.0.0.1:{port}") as http:
+    try:
+        async with aiohttp.ClientSession(f"http://127.0.0.1:{port}") as http:
+            yield http, port, server
+    finally:
+        await server.stop()
+        await server.lifecycle.shutdown()
+
+
+@pytest.fixture
+async def proxied(tmp_path, monkeypatch, started):
+    """As behind nginx with its default Host rewrite: web_ui.allowed_origins."""
+    async with page_with(tmp_path, monkeypatch, allowed_origins=[PUBLIC]) as (http, _, _):
         yield http
-    await server.stop()
-    await server.lifecycle.shutdown()
 
 
 async def test_behind_a_proxy_the_public_origin_may_change_things(proxied):
@@ -330,3 +341,27 @@ async def test_a_typed_env_placeholder_stays_one_in_the_file(page, monkeypatch):
         assert r.status == 200
     assert saved(path)["sp"]["password"] == "${env:PLANT_MQTT_PASSWORD}"
     assert running(bridge, "sp")["password"] == "from-env"
+
+
+# ----------------------------------------------------------------------------- read-only
+
+async def test_a_read_only_page_shows_everything_and_changes_nothing(tmp_path, monkeypatch, started):
+    """web_ui.read_only: the status for operators, nothing they can change (with the login off, or any role)."""
+    async with page_with(tmp_path, monkeypatch, read_only=True) as (http, _, server):
+        for path in ("/api/status", "/api/sources", "/api/settings", "/api/certs"):
+            async with http.get(path) as r:
+                assert r.status == 200, path
+        for method, path in (("POST", "/api/bridge/restart"), ("POST", "/api/sources/sp/stop"),
+                             ("PUT", "/api/settings"), ("DELETE", "/api/sources/sp"), ("POST", "/api/zerobus/stop")):
+            async with http.request(method, path, json={"values": {}}) as r:
+                body = await r.json()
+                assert r.status == 403 and "read-only" in body["message"], (method, path, r.status, body)
+        assert server.lifecycle.state == "running" and "sp" in server.bridge.clients     # nothing stopped
+        async with http.get("/api/auth/status") as r:
+            assert (await r.json())["read_only"] is True
+
+
+async def test_the_page_is_writable_by_default(page):
+    http, _, _ = page
+    async with http.get("/api/auth/status") as r:
+        assert (await r.json())["read_only"] is False

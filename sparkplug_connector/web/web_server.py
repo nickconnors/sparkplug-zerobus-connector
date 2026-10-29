@@ -147,6 +147,18 @@ def same_origin_middleware(allowed: frozenset = frozenset()):
     return middleware
 
 
+def read_only_middleware(read_only: bool):
+    """``web_ui.read_only``: every change through the API is refused, whatever the login or role (the page shows the
+    status only; signing in and out still work: they aren't under /api/)."""
+    @web.middleware
+    async def middleware(request: web.Request, handler):
+        if read_only and request.method not in SAFE_METHODS and request.path.startswith('/api/'):
+            return web.json_response({'status': 'error', 'message': 'The web page is read-only (web_ui.read_only): '
+                                      'changes are refused'}, status=403)
+        return await handler(request)
+    return middleware
+
+
 def _masked(value: Any) -> Any:
     """Sources for the API: values of password/secret/token keys replaced (the forms never send them back)."""
     if isinstance(value, dict):
@@ -212,6 +224,7 @@ class WebServer:
         self.security_logger = get_structured_logger()
         self.ssl_context = None
         self.restart_required = False       # settings saved that apply at the next start
+        self.read_only = str(web_ui_config.get('read_only', False)).strip().lower() in ('true', '1', 'yes', 'on')
 
     async def start(self):
         """Start web server."""
@@ -227,6 +240,9 @@ class WebServer:
         self.app.middlewares.append(security_headers_middleware)
         self.app.middlewares.append(same_origin_middleware(
             allowed_origins((self.config.get('web_ui') or {}).get('allowed_origins'))))
+        self.app.middlewares.append(read_only_middleware(self.read_only))
+        if self.read_only:
+            logger.info("✓ Web UI read-only (web_ui.read_only): changes through it are refused")
 
         # Login (web_ui.authentication)
         auth_config = self.config.get('web_ui', {}).get('authentication', {})
@@ -1056,13 +1072,15 @@ class WebServer:
             return web.json_response({
                 'auth_enabled': auth_enabled,
                 'authenticated': False,
-                'user': None
+                'user': None,
+                'read_only': self.read_only,
             })
 
         return web.json_response({
             'auth_enabled': auth_enabled,
             'authenticated': True,
-            'user': user.to_dict()
+            'user': user.to_dict(),
+            'read_only': self.read_only,
         })
 
     async def get_user_permissions(self, request: web.Request) -> web.Response:

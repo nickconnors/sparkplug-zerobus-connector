@@ -322,3 +322,20 @@ async def test_big_counters_are_compact_on_the_tiles_and_exact_on_hover(tab):
     await playwright_api.expect(rows.locator(".sub")).to_contain_text("since the bridge started, ")
     assert "2026" in await rows.locator(".sub").inner_text()
     assert t.errors == []
+
+
+async def test_a_read_only_page_disables_its_controls(browser, tmp_path, monkeypatch, started):
+    from test_web_ui import page_with
+    async with page_with(tmp_path, monkeypatch, read_only=True) as (_, port, _):
+        context = await browser.new_context(base_url=f"http://127.0.0.1:{port}")
+        t = await context.new_page()
+        errors = []
+        t.on("pageerror", lambda e: errors.append(str(e)))
+        await t.goto("/")
+        await playwright_api.expect(t.locator(".topbar .read-only")).to_have_text("read-only")
+        await playwright_api.expect(t.get_by_role("button", name="Stop the bridge")).to_be_disabled()
+        await playwright_api.expect(t.get_by_role("button", name="Restart")).to_be_disabled()
+        await t.goto("/sources.html")
+        await playwright_api.expect(t.get_by_role("button", name="Add source")).to_be_disabled()
+        await context.close()
+        assert errors == []

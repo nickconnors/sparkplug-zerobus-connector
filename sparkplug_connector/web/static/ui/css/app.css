@@ -99,6 +99,8 @@ body { margin: 0; background: var(--pico-background-color); }
 }
 .icon-btn:hover, .icon-btn:focus { color: var(--pico-color); background: var(--pico-secondary-focus); }
 .live { font-size: .75rem; color: var(--warn); }
+.read-only { font-size: .75rem; font-weight: 600; padding: .1rem .5rem; border-radius: 1rem; color: var(--pico-muted-color);
+  border: 1px solid var(--pico-muted-border-color); }
 
 .pill {
   display: inline-flex; align-items: center; gap: .4rem; padding: .12rem .65rem; border-radius: 999px;

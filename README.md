@@ -196,6 +196,13 @@ served from `sparkplug_connector/web/static/ui/` (versions and checksums: `vendo
 step. The policy allows no inline script or style; changes are accepted only from the connector's own pages (a
 request from a page of another site is refused; there is no CORS).
 
+### Read-only (off by default)
+
+`web_ui.read_only: true` makes the page a status display: everything can be seen, every change through it (saves,
+start, stop, restart, uploads, deletes) is refused with 403, whatever the login or role; the top bar says
+"read-only". It is set in the configuration file only (the page can't switch it off). With the login off, it is the
+way to let operators open the page without letting them change anything.
+
 ### Login (off by default)
 
 `web_ui.authentication.enabled: true` puts every page and API call (except `/health`) behind a login,

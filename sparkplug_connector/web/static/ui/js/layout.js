@@ -81,6 +81,7 @@
       + '    <h1>' + current.label + '</h1>'
       + '    <span class="pill" :class="stateClass" x-text="stateLabel" :title="stateTitle"></span>'
       + '    <span class="live" x-show="!live" title="The connector does not answer">offline</span>'
+      + '    <span class="read-only" x-show="readOnly" x-cloak title="web_ui.read_only: changes are refused">read-only</span>'
       + '    <span class="spacer"></span>'
       + '    <button type="button" class="icon-btn" @click="toggleTheme" :title="themeTitle" aria-label="Toggle light or dark theme">'
       + '      <span x-show="!dark">' + svg('moon') + '</span><span x-show="dark">' + svg('sun') + '</span></button>'
@@ -155,6 +156,7 @@
       get status() { return Alpine.store('connector').status; },
       get live() { return Alpine.store('connector').live; },
       get authEnabled() { return !!Alpine.store('connector').auth.auth_enabled; },
+      get readOnly() { return !!Alpine.store('connector').auth.read_only; },
       get username() {
         const u = Alpine.store('connector').auth.user;
         return u ? (u.email || u.name || u.user_id || '') : '';

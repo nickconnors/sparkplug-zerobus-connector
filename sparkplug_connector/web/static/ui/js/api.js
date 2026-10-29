@@ -21,8 +21,8 @@
       authPromise = fetch('/api/auth/status', { headers: { Accept: 'application/json' } })
         .then((res) => res.json())
         .then(async (status) => {
-          if (!status.auth_enabled) {
-            return Object.assign(status, { permissions: null });
+          if (!status.auth_enabled) {     // read-only: read only, whoever opens it
+            return Object.assign(status, { permissions: status.read_only ? ['read'] : null });
           }
           if (!status.authenticated) {
             location.href = '/static/login.html';
@@ -30,7 +30,8 @@
           }
           const res = await fetch('/api/auth/permissions', { headers: { Accept: 'application/json' } });
           const perms = res.ok ? await res.json() : {};
-          return Object.assign(status, { permissions: perms.permissions || [], role: perms.role });
+          const permissions = (perms.permissions || []).filter((p) => !status.read_only || p === 'read');
+          return Object.assign(status, { permissions, role: perms.role });
         });
     }
     return authPromise;
