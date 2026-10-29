@@ -223,6 +223,33 @@ with `require_client_cert: true`).
 `web_ui.tls.enabled: true` serves the UI over HTTPS with `cert_file` / `key_file` (and HSTS);
 `python scripts/generate_tls_cert.py` makes a self-signed set in `~/.sparkplug_connector/certs/`.
 
+### Behind a reverse proxy
+
+A change the page makes (save, start, stop, upload) is refused with 403 "a request from another site" unless the
+browser's `Origin` is the connector's own: the host the request arrived at, the host a proxy forwards in
+`X-Forwarded-Host` or `Forwarded: host=...` (RFC 7239), or an entry of `web_ui.allowed_origins`. Reading is never
+refused. Apache, Traefik and Caddy send `X-Forwarded-Host` by default; nginx doesn't, and by default it also
+replaces `Host` with the upstream's address, so either forward the host as the browser sent it (`$http_host`, with
+its port; `$host` drops the port, so it only works on 443/80):
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8001;
+    proxy_set_header Host $http_host;   # or: proxy_set_header X-Forwarded-Host $http_host;
+}
+```
+
+or list the public URL the page is opened on (scheme, host and port, no path):
+
+```yaml
+web_ui:
+  allowed_origins: [https://connector.plant.example.com]
+```
+
+With the login on, set `oauth.redirect_uri` to the public URL (`https://connector.plant.example.com/login/callback`)
+and, when the proxy serves HTTPS, `authentication.session.secure: true`. In Docker, publish the port to the proxy
+only (e.g. `-p 127.0.0.1:8001:8001` when the proxy runs on the same VM).
+
 ## Credentials
 
 - **Environment** (the way the web page sets them): `${env:NAME}` in the file, the value in the connector's

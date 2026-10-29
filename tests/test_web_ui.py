@@ -72,6 +72,74 @@ async def test_changes_from_the_connectors_own_pages_pass(page):
         assert r.status == 200 and "Access-Control-Allow-Origin" not in r.headers     # reading: no CORS
 
 
+# ----------------------------------------------------------------------------- behind a reverse proxy
+
+PUBLIC = "https://connector.plant.example.com"
+
+
+@pytest.mark.parametrize("origin, host, headers, allowed, ok", [
+    ("http://127.0.0.1:8001", "127.0.0.1:8001", {}, (), True),                       # no proxy
+    (PUBLIC, "127.0.0.1:8001", {"X-Forwarded-Host": "connector.plant.example.com"}, (), True),
+    (PUBLIC, "127.0.0.1:8001", {"X-Forwarded-Host": "connector.plant.example.com, edge.lb"}, (), True),   # a chain
+    (PUBLIC, "127.0.0.1:8001", {"Forwarded": "for=10.0.0.9;proto=https;host=connector.plant.example.com"}, (), True),
+    (PUBLIC, "127.0.0.1:8001", {"Forwarded": 'For="[2001:db8::1]";Host="connector.plant.example.com"'}, (), True),
+    (PUBLIC, "127.0.0.1:8001", {}, (PUBLIC,), True),                                  # nginx: Host rewritten
+    (PUBLIC, "127.0.0.1:8001", {}, ("HTTPS://Connector.Plant.Example.com:443/",), True),    # normalised
+    ("https://connector.plant.example.com:8443", "127.0.0.1:8001", {}, ("https://connector.plant.example.com:8443",), True),
+    (PUBLIC, "127.0.0.1:8001", {}, (), False),                                        # the 403 the README explains
+    ("http://localhost:18088", "localhost", {}, (), False),        # nginx's $host drops the port: $http_host keeps it
+    ("http://connector.plant.example.com", "127.0.0.1:8001", {}, (PUBLIC,), False),    # another scheme
+    ("https://evil.example", "127.0.0.1:8001", {"X-Forwarded-Host": "connector.plant.example.com"}, (PUBLIC,), False),
+    ("null", "127.0.0.1:8001", {}, (PUBLIC,), False),
+])
+def test_which_origins_count_as_the_connectors_own(origin, host, headers, allowed, ok):
+    from sparkplug_connector.web.web_server import allowed_origins, same_origin
+    assert same_origin(origin, host, headers, allowed_origins(list(allowed))) is ok
+
+
+def test_an_allowed_origin_that_isnt_one_is_ignored_and_logged(caplog):
+    from sparkplug_connector.web.web_server import allowed_origins
+    with caplog.at_level("ERROR"):
+        assert allowed_origins([PUBLIC, "connector.plant.example.com", "ftp://x", "https://a.example/path"]) == frozenset(
+            {PUBLIC})
+    assert caplog.text.count("web_ui.allowed_origins") == 3
+
+
+@pytest.fixture
+async def proxied(tmp_path, monkeypatch, started):
+    """The web server on a config with web_ui.allowed_origins, as behind nginx with its default Host rewrite."""
+    import socket
+    from test_web_sources import CONFIG
+    from sparkplug_connector.core import bridge as core_bridge
+    from sparkplug_connector.core.config_loader import ConfigLoader
+    from sparkplug_connector.web.web_server import WebServer
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("SPTEST_PASSWORD", "s3cret")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    raw = yaml.safe_load(CONFIG.format(port=port))
+    raw["web_ui"]["allowed_origins"] = [PUBLIC]
+    path = tmp_path / "connector.yaml"
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    config = ConfigLoader(config_path=path).load()
+    bridge = core_bridge.Bridge(config)
+    await bridge.start()
+    server = WebServer(config=config, bridge=bridge, config_path=path)
+    await server.start()
+    async with aiohttp.ClientSession(f"http://127.0.0.1:{port}") as http:
+        yield http
+    await server.stop()
+    await server.lifecycle.shutdown()
+
+
+async def test_behind_a_proxy_the_public_origin_may_change_things(proxied):
+    async with proxied.post("/api/sources/sp/stop", json={}, headers={"Origin": PUBLIC}) as r:
+        assert r.status == 200
+    async with proxied.post("/api/sources/sp/stop", json={}, headers={"Origin": "https://evil.example"}) as r:
+        assert r.status == 403
+
+
 # ----------------------------------------------------------------------------- settings
 
 async def test_settings_are_saved_to_the_file_for_the_next_start(page):

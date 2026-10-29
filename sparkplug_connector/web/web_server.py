@@ -77,20 +77,74 @@ UI_ASSETS = ("css", "js", "vendor", "img")
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
 
-@web.middleware
-async def same_origin_middleware(request: web.Request, handler):
+def _normal_origin(url: str) -> Optional[str]:
+    """``scheme://host[:port]`` in lower case, the scheme's default port dropped; None unless an http(s) origin (a
+    host, no path, query or user)."""
+    try:
+        u = urlsplit(url.strip())
+        port = u.port
+    except ValueError:
+        return None
+    if u.scheme.lower() not in ('http', 'https') or not u.hostname or u.username or u.query or u.fragment \
+            or u.path not in ('', '/'):
+        return None
+    host = f'[{u.hostname}]' if ':' in u.hostname else u.hostname
+    default = 443 if u.scheme.lower() == 'https' else 80
+    return f"{u.scheme.lower()}://{host.lower()}" + (f":{port}" if port and port != default else '')
+
+
+def allowed_origins(values: Any) -> frozenset:
+    """``web_ui.allowed_origins``: the public URLs of the page behind a reverse proxy that rewrites ``Host`` without
+    ``X-Forwarded-Host`` (nginx's default); an entry that isn't an origin is logged and ignored."""
+    out = set()
+    for value in values if isinstance(values, list) else ([values] if values else []):
+        origin = _normal_origin(value) if isinstance(value, str) else None
+        if origin is None:
+            logger.error(f"web_ui.allowed_origins: {value!r} is not an origin (scheme://host[:port]): ignored")
+        else:
+            out.add(origin)
+    return frozenset(out)
+
+
+def _forwarded_hosts(headers) -> set:
+    """The hosts a proxy says the browser asked for: ``X-Forwarded-Host`` (a list with chained proxies) and the
+    ``host=`` of RFC 7239's ``Forwarded``."""
+    hosts = {h.strip().lower() for h in (headers.get('X-Forwarded-Host') or '').split(',') if h.strip()}
+    for element in (headers.get('Forwarded') or '').split(','):
+        for pair in element.split(';'):
+            key, _, value = pair.partition('=')
+            if key.strip().lower() == 'host' and value.strip().strip('"'):
+                hosts.add(value.strip().strip('"').lower())
+    return hosts
+
+
+def same_origin(origin: str, host: str, headers, allowed: frozenset) -> bool:
+    """Whether a browser's ``Origin`` is the connector's own: the host the request came to (or that a proxy forwarded),
+    or one of ``web_ui.allowed_origins``."""
+    if origin == 'null':
+        return False
+    netloc = urlsplit(origin).netloc.lower()
+    if netloc and netloc in ({host.lower()} | _forwarded_hosts(headers)):
+        return True
+    return _normal_origin(origin) in allowed
+
+
+def same_origin_middleware(allowed: frozenset = frozenset()):
     """A request that changes something must come from the connector's own pages: one a browser sends from a page of
-    another origin (``Origin`` another host, or ``Sec-Fetch-Site: cross-site``) is refused. Clients that send
-    neither (curl, scripts) pass; the login, when on, still applies to them."""
-    if request.method not in SAFE_METHODS:
-        origin = request.headers.get('Origin')
-        hosts = {request.host, request.headers.get('X-Forwarded-Host', '')} - {''}
-        cross = request.headers.get('Sec-Fetch-Site') == 'cross-site'
-        if origin is not None and (origin == 'null' or urlsplit(origin).netloc not in hosts):
-            cross = True
-        if cross:
-            return web.json_response({'status': 'error', 'message': 'Refused: a request from another site'}, status=403)
-    return await handler(request)
+    another origin (``Origin`` not the connector's: ``same_origin``, or ``Sec-Fetch-Site: cross-site``) is refused.
+    Clients that send neither (curl, scripts) pass; the login, when on, still applies to them."""
+    @web.middleware
+    async def middleware(request: web.Request, handler):
+        if request.method not in SAFE_METHODS:
+            origin = request.headers.get('Origin')
+            cross = request.headers.get('Sec-Fetch-Site') == 'cross-site'
+            if origin is not None and not same_origin(origin, request.host, request.headers, allowed):
+                cross = True
+            if cross:
+                return web.json_response({'status': 'error', 'message': 'Refused: a request from another site'},
+                                         status=403)
+        return await handler(request)
+    return middleware
 
 
 def _masked(value: Any) -> Any:
@@ -171,7 +225,8 @@ class WebServer:
 
         # Security headers (logged after the TLS setup); same origin only for changes
         self.app.middlewares.append(security_headers_middleware)
-        self.app.middlewares.append(same_origin_middleware)
+        self.app.middlewares.append(same_origin_middleware(
+            allowed_origins((self.config.get('web_ui') or {}).get('allowed_origins'))))
 
         # Login (web_ui.authentication)
         auth_config = self.config.get('web_ui', {}).get('authentication', {})

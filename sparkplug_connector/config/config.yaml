@@ -15,6 +15,8 @@ web_ui:
   enabled: true
   host: 0.0.0.0
   port: 8001
+  allowed_origins: []              # behind a reverse proxy that rewrites Host: the page's public URL(s), e.g.
+                                   # [https://connector.example.com] (README: Behind a reverse proxy)
   authentication:                  # login to the web page, off by default
     enabled: false
     method: oauth2                 # oauth2 (a Databricks workspace's OAuth) or client_cert (needs tls)
