@@ -17,7 +17,7 @@
 <main x-data="settingsPage">
   <div class="page-head">
     <p>The connector-wide settings, stored in <span class="mono" x-text="file"></span>. They take effect when the
-      connector restarts. Sources and Zerobus have their own pages.</p>
+      bridge restarts. Sources and Zerobus have their own pages.</p>
     <div class="actions"><button type="button" class="outline secondary small" @click="expandAll">Expand all</button></div>
   </div>
 
@@ -81,7 +81,9 @@
   <dialog x-ref="review" @close="pendingChanges = []">
     <article>
       <header><h3>Save these settings?</h3></header>
-      <p>They are saved to the configuration file and take effect when the connector restarts.</p>
+      <p>They are saved to the configuration file and take effect when the bridge restarts: Save and restart now, or
+        later from the banner or the Status page. A restart stops the sources for a moment (a primary host goes OFFLINE,
+        so its edge nodes keep their data; a plain subscriber misses what is published meanwhile).</p>
       <div class="table-wrap">
         <table class="diff">
           <thead><tr><th>Setting</th><th>Was</th><th>Becomes</th></tr></thead>
@@ -98,7 +100,8 @@
       </div>
       <footer>
         <button type="button" class="secondary outline" @click="closeReview">Cancel</button>
-        <button type="button" @click="save" :aria-busy="saving" :disabled="saving">Save</button>
+        <button type="button" class="secondary" @click="save" :aria-busy="saving" :disabled="saving">Save</button>
+        <button type="button" x-show="canRestart" @click="saveAndRestart" :aria-busy="saving" :disabled="saving">Save and restart</button>
       </footer>
     </article>
   </dialog>

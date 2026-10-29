@@ -1,5 +1,5 @@
 // Settings page, rendered from /api/settings (schema + the file's values). Only changed keys are sent; the server
-// checks them again and saves them to the file; they take effect when the connector restarts.
+// checks them again and saves them to the file; they take effect when the bridge restarts (Save and restart).
 document.addEventListener('alpine:init', () => {
   'use strict';
   const Alpine = window.Alpine;
@@ -60,6 +60,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     can(permission) { return Alpine.store('connector').can(permission); },
+    get canRestart() { return this.can('start_stop'); },
 
     // --- state ---
 
@@ -168,7 +169,9 @@ document.addEventListener('alpine:init', () => {
 
     closeReview() { this.$refs.review.close(); },
 
-    async save() {
+    saveAndRestart() { return this.save(true); },
+
+    async save(restart) {
       const values = {};
       this.changedKeys.forEach((k) => { values[k] = this.values[k]; });
       this.saving = true;
@@ -176,7 +179,12 @@ document.addEventListener('alpine:init', () => {
         const settings = await window.api.put('/api/settings', { values });
         this.apply(settings);
         this.$refs.review.close();
-        window.toast('Saved. Restart the connector to apply.', 'ok');
+        if (restart === true) {
+          await window.api.post('/api/bridge/restart');
+          window.toast('Saved. The bridge is restarting with the new settings.', 'ok');
+        } else {
+          window.toast('Saved. Restart the bridge to apply.', 'ok');
+        }
         await Alpine.store('connector').refresh();
       } catch (e) {
         this.$refs.review.close();

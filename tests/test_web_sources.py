@@ -139,7 +139,7 @@ async def page(tmp_path, monkeypatch, started):
     async with aiohttp.ClientSession(f"http://127.0.0.1:{port}") as http:
         yield http, path, bridge
     await server.stop()
-    await bridge.stop()
+    await server.lifecycle.shutdown()           # the bridge of the moment (a page's restart makes a new one)
 
 
 def saved(path) -> dict:

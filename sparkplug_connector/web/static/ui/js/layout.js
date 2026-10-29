@@ -87,7 +87,9 @@
       + '    <button type="button" class="icon-btn" x-show="authEnabled" @click="signOut" title="Sign out" aria-label="Sign out">' + svg('logout') + '</button>'
       + '  </header>'
       + '  <div class="banner" x-show="restartRequired" x-cloak role="status">'
-      + '    ' + svg('alert') + '<span>Saved settings take effect when the connector restarts.</span>'
+      + '    ' + svg('alert') + '<span>Saved settings take effect when the bridge restarts.</span>'
+      + '    <button type="button" class="small" x-show="canRestart" @click="restartNow" :aria-busy="restarting" :disabled="restarting">'
+      + '      ' + svg('restart') + 'Restart now</button>'
       + '  </div>'
       + '</div>';
     document.body.insertBefore(shell, document.body.firstChild);
@@ -137,6 +139,7 @@
 
     Alpine.data('layout', () => ({
       dark: isDark(),
+      restarting: false,
 
       init() {
         const store = Alpine.store('connector');
@@ -155,6 +158,22 @@
         return u ? (u.email || u.name || u.user_id || '') : '';
       },
       get restartRequired() { return !!(this.status && this.status.restart_required); },
+      get canRestart() {
+        const s = this.status;
+        return !!s && Alpine.store('connector').can('start_stop') && (s.bridge_state === 'running' || s.bridge_state === 'stopped');
+      },
+      async restartNow() {
+        this.restarting = true;
+        try {
+          await window.api.post('/api/bridge/restart');
+          window.toast('The bridge is restarting with the saved settings', 'ok');
+          await Alpine.store('connector').refresh();
+        } catch (e) {
+          window.toast(e.message, 'error');
+        } finally {
+          this.restarting = false;
+        }
+      },
       get themeTitle() { return this.dark ? 'Use the light theme' : 'Use the dark theme'; },
 
       get failing() {
@@ -165,7 +184,8 @@
       get stateLabel() {
         const s = this.status;
         if (!s) return 'Loading…';
-        if (s.bridge_starting) return 'Starting…';
+        if (s.bridge_state === 'stopping') return 'Stopping…';
+        if (s.bridge_starting || s.bridge_state === 'starting') return 'Starting…';
         if (!s.bridge_running) return 'Stopped';
         if (!s.zerobus_enabled) return 'Running · Zerobus off';
         return this.failing.length ? 'Running · errors' : 'Running';
@@ -173,7 +193,7 @@
       get stateClass() {
         const s = this.status;
         if (!s) return 'pill-muted';
-        if (s.bridge_starting) return 'pill-warn';
+        if (s.bridge_starting || s.bridge_state === 'starting' || s.bridge_state === 'stopping') return 'pill-warn';
         if (!s.bridge_running) return 'pill-muted';
         if (!s.zerobus_enabled || this.failing.length) return 'pill-warn';
         return 'pill-ok';

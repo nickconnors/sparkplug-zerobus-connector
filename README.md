@@ -166,7 +166,11 @@ py -3.12 -m venv .venv
 `http://127.0.0.1:8001/`:
 
 - **Status**: rows written, queued rows, sources and edge nodes; each source's state (ONLINE/OFFLINE, MQTT, rows,
-  Zerobus, last error) with start and stop; Zerobus and the diagnostics; the counters.
+  Zerobus, last error) with start and stop; Zerobus and the diagnostics; the counters. The bridge's Stop, Start and
+  Restart: Stop stops every source and writes the queued rows (up to `zerobus.drain_timeout_seconds`), the page
+  stays up; Start and Restart read the configuration file again (a new bridge: the write-ahead log replays what
+  wasn't written). A restart stops the sources for a moment: a primary host goes OFFLINE first, so its edge nodes
+  keep their data; a plain subscriber misses what is published meanwhile.
 - **Sources**: add, edit, delete, start and stop: the endpoint, the MQTT user and password, client id, keep-alive,
   topics, TLS files (from the Certificates page), the table, the Sparkplug settings and the NBIRTH procedure call.
 - **Edge nodes**: each running source's edge nodes and devices, online or offline and since when; a rebirth request
@@ -174,7 +178,8 @@ py -3.12 -m venv .venv
 - **Zerobus**: workspace, endpoint, default table and service principal; start and stop; each open table's writer
   and write-ahead log; checks of the endpoint and credentials (and a test stream).
 - **Settings**: the connector-wide settings (diagnostics, queue and batch, write-ahead log, the certificates'
-  directory), applied at the next start.
+  directory), applied when the bridge restarts: **Save and restart**, or **Restart now** on the banner that shows
+  after a save. (Environment variables still need the connector itself restarted.)
 - **Certificates**: upload, replace and delete the MQTT TLS files (`web_ui.certs_dir`, default
   `~/.sparkplug_connector/certs`; in Docker, mount a volume there). A source's TLS path that is a bare file name is
   read from this directory.

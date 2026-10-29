@@ -1,6 +1,7 @@
 """The settings the web page's Settings page edits (``GET/PUT /api/settings``): the connector-wide ones that have no
 page of their own, each a dotted path in the configuration file. They are read when the connector starts, so a
-change takes effect at the next start. Sources and Zerobus have their own pages (and APIs).
+change takes effect when the bridge restarts (``POST /api/bridge/restart``, the page's Save and restart). Sources
+and Zerobus have their own pages (and APIs).
 """
 from __future__ import annotations
 

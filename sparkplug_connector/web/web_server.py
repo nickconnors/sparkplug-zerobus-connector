@@ -26,6 +26,7 @@ from aiohttp import web
 from typing import Callable
 
 from sparkplug_connector.core.cert_store import CertError, CertStore, MAX_SIZE, certs_dir, used_by
+from sparkplug_connector.core.lifecycle import BridgeLifecycle
 from sparkplug_connector.web import settings_schema
 
 # Authentication and authorization (off by default)
@@ -128,7 +129,8 @@ def _edited(entry: Dict[str, Any], current: Dict[str, Any], form: Dict[str, Any]
 class WebServer:
     """Web server for configuration and monitoring."""
 
-    def __init__(self, config: Dict[str, Any], bridge, config_path: Optional[Path] = None):
+    def __init__(self, config: Dict[str, Any], bridge, config_path: Optional[Path] = None,
+                 lifecycle: Optional[BridgeLifecycle] = None):
         """Initialize web server.
 
         Args:
@@ -136,10 +138,13 @@ class WebServer:
             bridge: Bridge instance
             config_path: the file the connector was started with (source changes are saved there;
                 None: the package's default config.yaml)
+            lifecycle: the bridge's stop/start/restart (None: one on ``bridge`` and ``config_path``)
         """
         self.config = config
         self.bridge = bridge
         self.config_path = Path(config_path) if config_path else None
+        self.lifecycle = lifecycle or BridgeLifecycle(bridge, load_config=lambda: self._config_loader().load())
+        self.lifecycle.add_listener(self._new_bridge)
 
         web_ui_config = config.get('web_ui', {})
         self.host = web_ui_config.get('host', '0.0.0.0')
@@ -200,6 +205,7 @@ class WebServer:
             # Bridge control
             web.post('/api/bridge/start', self.start_bridge),
             web.post('/api/bridge/stop', self.stop_bridge),
+            web.post('/api/bridge/restart', self.restart_bridge),
 
             # ZeroBus
             web.get('/api/zerobus/config', self.get_zerobus_config),
@@ -728,25 +734,47 @@ class WebServer:
 
 
 
+    def _new_bridge(self, bridge, config: Dict[str, Any]) -> None:
+        """A start after a stop built a new bridge from the file: it has every saved setting."""
+        self.bridge, self.config = bridge, config
+        self.restart_required = False
+
+    def _lifecycle_busy(self) -> Optional[web.Response]:
+        if self.lifecycle.busy:
+            return web.json_response({'status': 'error', 'message': f'The bridge is {self.lifecycle.state}: wait for it',
+                                      'state': self.lifecycle.state}, status=409)
+        return None
+
     @require_permission(Permission.START_STOP)
     async def start_bridge(self, request: web.Request) -> web.Response:
-        """Start protocol sources (bridge) in background."""
-        try:
-            asyncio.create_task(self.bridge.start_infra())
-            return web.json_response({'status': 'ok', 'message': 'Bridge starting'})
-        except Exception as e:
-            logger.error(f"Failed to start bridge: {e}", exc_info=True)
-            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+        """The bridge and its enabled sources, in the background (after a stop: a new bridge from the file)."""
+        busy = self._lifecycle_busy()
+        if busy is not None:                # (a Response is a mapping: an empty one is falsy)
+            return busy
+        self.lifecycle.submit('start')
+        return web.json_response({'status': 'ok', 'message': 'Bridge starting', 'state': self.lifecycle.state})
 
     @require_permission(Permission.START_STOP)
     async def stop_bridge(self, request: web.Request) -> web.Response:
-        """Stop protocol sources (bridge)."""
+        """Every source stopped and the queued rows written (up to zerobus.drain_timeout_seconds); the page stays."""
+        busy = self._lifecycle_busy()
+        if busy is not None:
+            return busy
         try:
-            await self.bridge.stop()
-            return web.json_response({'status': 'ok', 'message': 'Bridge stopped'})
+            await self.lifecycle.stop()
+            return web.json_response({'status': 'ok', 'message': 'Bridge stopped', 'state': self.lifecycle.state})
         except Exception as e:
             logger.error(f"Failed to stop bridge: {e}", exc_info=True)
             return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+
+    @require_permission(Permission.START_STOP)
+    async def restart_bridge(self, request: web.Request) -> web.Response:
+        """Stop, then a new bridge from the file (the saved settings apply), in the background."""
+        busy = self._lifecycle_busy()
+        if busy is not None:
+            return busy
+        self.lifecycle.submit('restart')
+        return web.json_response({'status': 'ok', 'message': 'Bridge restarting', 'state': self.lifecycle.state})
 
 
     @require_permission(Permission.START_STOP)
@@ -803,6 +831,7 @@ class WebServer:
         try:
             status = self.bridge.get_status()
             status['restart_required'] = self.restart_required      # settings saved that apply at the next start
+            status['bridge_state'] = self.lifecycle.state             # starting, running, stopping or stopped
             status['sources'] = [{'name': src.get('name'), 'enabled': bool(src.get('enabled', True)),
                                   'running': src.get('name') in self.bridge.clients} for src in self.bridge.sources]
             return web.json_response(status)

@@ -20,6 +20,10 @@
     <div class="actions">
       <button type="button" x-show="canStartBridge" @click="startBridge" :aria-busy="busy === 'bridge'" :disabled="!!busy || !can('start_stop')">
         <span data-icon="play"></span>Start the bridge</button>
+      <button type="button" class="secondary outline" x-show="canStopBridge" @click="restartBridge" :aria-busy="busy === 'restart'" :disabled="!!busy || !can('start_stop')">
+        <span data-icon="restart"></span>Restart</button>
+      <button type="button" class="secondary" x-show="canStopBridge" @click="askStop" :aria-busy="busy === 'stop'" :disabled="!!busy || !can('start_stop')">
+        <span data-icon="stop"></span>Stop the bridge</button>
     </div>
   </div>
 
@@ -96,6 +100,18 @@
       </dl>
     </article>
   </div>
+
+  <dialog x-ref="stop">
+    <article class="narrow">
+      <header><h3>Stop the bridge?</h3></header>
+      <p>Every source stops (a primary host goes OFFLINE first, so its edge nodes keep their data) and the queued rows
+        are written. The page stays up: Start or Restart reads the configuration file again.</p>
+      <footer>
+        <button type="button" class="secondary outline" @click="cancelStop">Cancel</button>
+        <button type="button" class="danger" @click="confirmStop">Stop</button>
+      </footer>
+    </article>
+  </dialog>
 </main>
 </body>
 </html>

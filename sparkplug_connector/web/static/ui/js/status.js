@@ -29,13 +29,16 @@ document.addEventListener('alpine:init', () => {
     get summary() {
       const s = this.status;
       if (s.bridge_running === undefined) return 'Loading the connector status…';
+      if (s.bridge_state === 'stopping') return 'The bridge is stopping: its sources stop and the queued rows are written.';
+      if (s.bridge_state === 'starting') return 'The bridge is starting.';
       if (!s.bridge_running) return 'The bridge is not running: start it, or set bridge.autostart.';
       if (!s.zerobus_enabled) return 'The connector is running, but Zerobus is off: rows stay queued. Start it on the Zerobus page.';
       const failing = Object.keys(this.health).filter((k) => this.health[k].zerobus_failing_since);
       if (failing.length) return 'The connector is running, but writes to Databricks are failing for ' + failing.join(', ') + '.';
       return 'The connector is running and writing to Databricks.';
     },
-    get canStartBridge() { return this.status.bridge_running === false && !this.status.bridge_starting; },
+    get canStartBridge() { return this.status.bridge_state === 'stopped'; },
+    get canStopBridge() { return this.status.bridge_state === 'running'; },
 
     get rowsWritten() {
       const values = Object.values(this.health).map((h) => h.rows_written || 0);
@@ -98,6 +101,35 @@ document.addEventListener('alpine:init', () => {
       try {
         await window.api.post('/api/bridge/start');
         window.toast('The bridge is starting', 'ok');
+        await this.store.refresh();
+      } catch (e) {
+        window.toast(e.message, 'error');
+      } finally {
+        this.busy = null;
+      }
+    },
+
+    askStop() { this.$refs.stop.showModal(); },
+    cancelStop() { this.$refs.stop.close(); },
+    async confirmStop() {
+      this.$refs.stop.close();
+      this.busy = 'stop';
+      try {
+        await window.api.post('/api/bridge/stop');
+        window.toast('The bridge is stopped', 'ok');
+      } catch (e) {
+        window.toast(e.message, 'error');
+      } finally {
+        this.busy = null;
+        await this.store.refresh();
+      }
+    },
+
+    async restartBridge() {
+      this.busy = 'restart';
+      try {
+        await window.api.post('/api/bridge/restart');
+        window.toast('The bridge is restarting', 'ok');
         await this.store.refresh();
       } catch (e) {
         window.toast(e.message, 'error');

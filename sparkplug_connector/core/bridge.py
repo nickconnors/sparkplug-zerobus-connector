@@ -784,6 +784,11 @@ class Bridge:
         for notifier in self.birth_notifiers.values():
             await notifier.stop()
 
+        # for good: a start after a stop is a new Bridge (core/lifecycle.py); no source is shown running
+        self.clients.clear()
+        self.client_tasks.clear()
+        self.host_tasks.clear()
+        self.running = False
         logger.info("✓ Bridge stopped")
 
     def sparkplug_health(self) -> Dict[str, Dict[str, Any]]:

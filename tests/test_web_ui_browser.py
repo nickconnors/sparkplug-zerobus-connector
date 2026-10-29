@@ -115,8 +115,8 @@ async def test_settings_are_reviewed_saved_and_the_restart_banner_shows(tab):
     await t.check("[id='diagnostics.enabled']")
     await t.click("text=Review and save…")
     await t.wait_for_selector("dialog[open] .diff >> text=Diagnostics")
-    await t.click("dialog[open] footer >> text=Save")
-    await t.wait_for_selector(".banner >> text=take effect when the connector restarts")
+    await t.locator("dialog[open] footer").get_by_role("button", name="Save", exact=True).click()
+    await t.wait_for_selector(".banner >> text=take effect when the bridge restarts")
     assert yaml.safe_load(path.read_text())["diagnostics"] == {"enabled": True} and t.errors == []
 
 
@@ -203,4 +203,37 @@ async def test_a_recovered_writer_error_is_history_not_a_current_error(tab, fail
     await playwright_api.expect(cell).to_contain_text("opening a Zerobus stream: unreachable")
     assert "2026" in await cell.inner_text()                                   # with its time
     assert ("error-text" in (await cell.get_attribute("class"))) is failing
+    assert t.errors == []
+
+
+async def test_the_bridge_is_stopped_started_and_restarted_from_the_pages(tab):
+    """Status: Stop (its dialog), then Start; Settings: Save and restart, which clears the banner; the banner's
+    Restart now after a plain save."""
+    t, path, _ = tab
+    await t.goto("/")
+    pill = t.locator(".pill")
+    await playwright_api.expect(pill).to_have_text("Running · Zerobus off")
+    await t.get_by_role("button", name="Stop the bridge").click()
+    await t.locator("dialog[open]").get_by_role("button", name="Stop").click()
+    await playwright_api.expect(pill).to_have_text("Stopped")
+    await t.get_by_role("button", name="Start the bridge").click()
+    await playwright_api.expect(pill).to_have_text("Running · Zerobus off")
+
+    await t.goto("/settings.html")
+    await t.get_by_role("button", name="Expand all").click()
+    field = t.locator('[id="zerobus.drain_timeout_seconds"]')
+    await field.fill("4")
+    await t.get_by_role("button", name="Review and save…").click()
+    await t.locator("dialog[open]").get_by_role("button", name="Save and restart").click()
+    banner = t.locator(".banner")
+    await playwright_api.expect(banner).to_be_hidden()
+    assert yaml.safe_load(path.read_text())["zerobus"]["drain_timeout_seconds"] == 4
+
+    await field.fill("6")
+    await t.get_by_role("button", name="Review and save…").click()
+    await t.locator("dialog[open]").get_by_role("button", name="Save", exact=True).click()
+    await playwright_api.expect(banner).to_be_visible()
+    await banner.get_by_role("button", name="Restart now").click()
+    await playwright_api.expect(banner).to_be_hidden()
+    await playwright_api.expect(pill).to_have_text("Running · Zerobus off")
     assert t.errors == []
