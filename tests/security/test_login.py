@@ -198,3 +198,11 @@ async def test_an_unauthenticated_request_is_one_short_line_in_the_log(server, c
             assert r.status == 401
     assert [r for r in caplog.records if r.levelname in ("ERROR", "CRITICAL")] == []
     assert not any(r.exc_info for r in caplog.records)
+
+
+async def test_with_the_login_on_the_host_is_not_checked(server):
+    """DNS rebinding (web_server.known_host_middleware): a rebound page has no session cookie, so the login closes
+    it; the Host check is for the login off only (a proxy setup with the login keeps working unchanged)."""
+    http, port = server
+    async with http.get("/api/status", headers={"Host": f"evil.example:{port}"}, allow_redirects=False) as r:
+        assert r.status == 401

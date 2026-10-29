@@ -18,6 +18,8 @@ web_ui:
   read_only: false                 # true: the page shows the status only, every change through it is refused
   allowed_origins: []              # behind a reverse proxy that rewrites Host: the page's public URL(s), e.g.
                                    # [https://connector.example.com] (README: Behind a reverse proxy)
+  allowed_hosts: []                # with the login off, the names the page is opened by besides IP addresses,
+                                   # localhost and the machine's name, e.g. [plant-vm-01]; ['*']: any (README: Host names)
   authentication:                  # login to the web page, off by default
     enabled: false
     method: oauth2                 # oauth2 (a Databricks workspace's OAuth) or client_cert (needs tls)

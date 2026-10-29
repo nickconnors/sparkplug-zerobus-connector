@@ -480,3 +480,45 @@ def test_the_config_version_is_hashed_again_only_when_the_file_changed(tmp_path,
     assert second != first and len(reads) == 2
     path.write_text("a: 22\n")
     assert server.config_version() not in (first, second) and len(reads) == 3
+
+
+# ----------------------------------------------------------------------------- DNS rebinding (R2-8, 2026-10-29)
+
+REBOUND = "evil.example"      # a name the attacker's DNS points at the connector after its page has loaded
+
+
+async def test_a_page_on_a_rebound_name_can_neither_read_nor_change_anything(tmp_path, monkeypatch, started, caplog):
+    """DNS rebinding: the attacker's page, on a name rebound to the connector, sends Origin and Host with that name,
+    so the same-origin check passes. With the login off (no cookie to lack) only the Host tells it apart."""
+    async with page_with(tmp_path, monkeypatch) as (http, port, server):
+        rebound = {"Host": f"{REBOUND}:{port}", "Origin": f"http://{REBOUND}:{port}"}
+        for method, path in (("GET", "/"), ("GET", "/api/status"), ("GET", "/api/sources"), ("POST", "/api/bridge/stop"),
+                             ("PUT", "/api/sources/sp")):
+            async with http.request(method, path, json={}, headers=rebound) as r:
+                text = await r.text()
+                assert r.status == 403 and "web_ui.allowed_hosts" in text and REBOUND in text, (method, path, r.status)
+        async with http.get("/api/status", headers={"X-Forwarded-Host": f"{REBOUND}:{port}"}) as r:
+            assert r.status == 403                          # behind a proxy that forwards the browser's Host
+        async with http.get("/health", headers=rebound) as r:
+            assert r.status == 200                          # reveals nothing; probes may use a service name
+        assert server.lifecycle.state == "running" and "sp" in server.bridge.clients
+    assert caplog.text.count(f"Refused a request for host {REBOUND}") == 1          # once per name, not per poll
+
+
+async def test_the_connector_s_own_names_are_known(tmp_path, monkeypatch, started):
+    monkeypatch.setattr("socket.gethostname", lambda: "Plant-VM.corp.example")
+    async with page_with(tmp_path, monkeypatch, allowed_hosts=["connector.plant.example.com", "bad host"],
+                         allowed_origins=["https://proxy.plant.example.com"]) as (http, port, _):
+        for host in ("127.0.0.1", f"127.0.0.1:{port}", f"[::1]:{port}", f"localhost:{port}", "app.localhost",
+                     "plant-vm", "plant-vm.corp.example.", "CONNECTOR.plant.example.com", "proxy.plant.example.com"):
+            async with http.get("/api/status", headers={"Host": host}) as r:
+                assert r.status == 200, host
+        for host in ("plant-vm.evil.example", "example.com", "bad host", "connector.plant.example.com.evil.example"):
+            async with http.get("/api/status", headers={"Host": host}) as r:
+                assert r.status == 403, host
+
+
+async def test_allowed_hosts_star_turns_the_check_off(tmp_path, monkeypatch, started):
+    async with page_with(tmp_path, monkeypatch, allowed_hosts=["*"]) as (http, port, _):
+        async with http.get("/api/status", headers={"Host": f"{REBOUND}:{port}"}) as r:
+            assert r.status == 200

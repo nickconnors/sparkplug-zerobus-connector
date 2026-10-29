@@ -198,6 +198,22 @@ served from `sparkplug_connector/web/static/ui/` (versions and checksums: `vendo
 step. The policy allows no inline script or style; changes are accepted only from the connector's own pages (a
 request from a page of another site is refused; there is no CORS).
 
+### Host names (with the login off)
+
+With the login off, the page answers only to the names the connector knows as its own: IP addresses, `localhost`,
+the machine's host name, the hosts of `web_ui.allowed_origins`, and the names in `web_ui.allowed_hosts`. A request
+for another name (in `Host`, or in a host a proxy forwards) is refused with 403, `/health` excepted. This stops DNS
+rebinding: a web page on the attacker's own name, rebound to the connector's address, could otherwise read the
+status and stop the bridge from a browser that can reach the connector. **In Docker the machine's host name is the
+container's**: to open the page by the VM's name (or a DNS alias), list it:
+
+```yaml
+web_ui:
+  allowed_hosts: [plant-vm-01, plant-vm-01.corp.example.com]
+```
+
+`['*']` turns the check off. With the login on, the host isn't checked (a rebound page has no session cookie).
+
 ### Read-only (off by default)
 
 `web_ui.read_only: true` makes the page a status display: everything can be seen, every change through it (saves,
@@ -236,10 +252,11 @@ with `require_client_cert: true`).
 
 A change the page makes (save, start, stop, upload) is refused with 403 "a request from another site" unless the
 browser's `Origin` is the connector's own: the host the request arrived at, the host a proxy forwards in
-`X-Forwarded-Host` or `Forwarded: host=...` (RFC 7239), or an entry of `web_ui.allowed_origins`. Reading is never
-refused. Apache, Traefik and Caddy send `X-Forwarded-Host` by default; nginx doesn't, and by default it also
-replaces `Host` with the upstream's address, so either forward the host as the browser sent it (`$http_host`, with
-its port; `$host` drops the port, so it only works on 443/80):
+`X-Forwarded-Host` or `Forwarded: host=...` (RFC 7239), or an entry of `web_ui.allowed_origins`. With the login
+off, the public name must also be one the connector knows (Host names, above): list it in `web_ui.allowed_hosts`
+(an entry of `allowed_origins` counts too). Apache, Traefik and Caddy send `X-Forwarded-Host` by default; nginx
+doesn't, and by default it also replaces `Host` with the upstream's address, so either forward the host as the
+browser sent it (`$http_host`, with its port; `$host` drops the port, so it only works on 443/80):
 
 ```nginx
 location / {

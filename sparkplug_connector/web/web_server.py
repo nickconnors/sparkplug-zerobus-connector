@@ -7,7 +7,8 @@
 - Optional login (OAuth2) with role-based permissions
 
 The web page (``static/ui/``) is plain HTML, Alpine.js (CSP build) and Pico CSS, served as files: no build step.
-Same origin only: a request that changes something from a page of another origin is refused (no CORS).
+Same origin only: a request that changes something from a page of another origin is refused (no CORS). With the
+login off, a request for a host name the connector doesn't know as its own is refused (DNS rebinding).
 Secrets (a source's MQTT password, the Zerobus client secret) come from environment variables only: the page sets
 ``${env:NAME}`` and never sees or sends a secret's value.
 """
@@ -15,10 +16,12 @@ Secrets (a source's MQTT password, the Zerobus client secret) come from environm
 import asyncio
 import functools
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -129,6 +132,78 @@ def same_origin(origin: str, host: str, headers, allowed: frozenset) -> bool:
     if netloc and netloc in ({host.lower()} | _forwarded_hosts(headers)):
         return True
     return _normal_origin(origin) in allowed
+
+
+def _host_name(value: str) -> Optional[str]:
+    """A ``Host`` (or forwarded host) value's name: lower case, no port, no trailing dot (None: not a host)."""
+    try:
+        name = urlsplit('//' + value.strip()).hostname
+    except ValueError:
+        return None
+    name = (name or '').rstrip('.')
+    return name if name and re.fullmatch(r'[a-z0-9.:_%-]+', name) else None
+
+
+def known_hosts(values: Any, origins: frozenset) -> Optional[frozenset]:
+    """The names the connector answers to besides IP addresses and ``localhost``: ``web_ui.allowed_hosts``, the hosts
+    of ``web_ui.allowed_origins`` and the machine's own name (in Docker the container's: a VM's name needs listing).
+    None: any (``allowed_hosts: ['*']``). An entry that isn't a host name is logged and ignored."""
+    names = set()
+    for value in values if isinstance(values, list) else ([values] if values else []):
+        if str(value).strip() == '*':
+            return None
+        name = _host_name(value) if isinstance(value, str) else None
+        if name is None:
+            logger.error(f"web_ui.allowed_hosts: {value!r} is not a host name: ignored")
+        else:
+            names.add(name)
+    names |= {urlsplit(origin).hostname for origin in origins}
+    try:
+        machine = socket.gethostname().strip().lower().rstrip('.')
+    except OSError:
+        machine = ''
+    if machine:
+        names |= {machine, machine.split('.')[0]}
+    return frozenset(names)
+
+
+def host_known(name: Optional[str], known: frozenset) -> bool:
+    if name is None:
+        return False
+    try:
+        ipaddress.ip_address(name.split('%')[0])       # an IP address: no DNS name to rebind
+        return True
+    except ValueError:
+        return name in known or name == 'localhost' or name.endswith('.localhost')
+
+
+def known_host_middleware(known: Optional[frozenset]):
+    """DNS rebinding: a page on the attacker's name, rebound to the connector's address, sends that name as both
+    ``Origin`` and ``Host``, so the same-origin check passes; with the login off it could read the status and stop
+    the bridge. Every request for a host the connector doesn't know as its own (``known_hosts``; the ``Host`` and any
+    host a proxy forwards) is refused, ``/health`` excepted (it reveals nothing). None (``*``, or the login on: a
+    rebound page has no session cookie): no check. A request without ``Host`` isn't a browser's: not checked."""
+    logged: set = set()
+
+    @web.middleware
+    async def middleware(request: web.Request, handler):
+        if known is not None and request.path != '/health':
+            hosts = [request.headers['Host']] if 'Host' in request.headers else []
+            for host in hosts + sorted(_forwarded_hosts(request.headers)):
+                if not host_known(_host_name(host), known):
+                    name = _host_name(host) or host
+                    if name not in logged and len(logged) < 100:
+                        logged.add(name)
+                        logger.warning(f"Refused a request for host {name}: not one of the connector's names (add it "
+                                       "to web_ui.allowed_hosts if the page is opened so)")
+                    message = (f"Refused: this page was opened as {name}, which the connector doesn't know as its own "
+                               f"(a DNS rebinding attack looks like this). If that is how you open it, add {name} to "
+                               "web_ui.allowed_hosts, or open it by its IP address.")
+                    if request.path.startswith('/api/'):
+                        return web.json_response({'status': 'error', 'message': message}, status=403)
+                    return web.Response(text=message + '\n', status=403)
+        return await handler(request)
+    return middleware
 
 
 def same_origin_middleware(allowed: frozenset = frozenset()):
@@ -254,10 +329,15 @@ class WebServer:
         self.app.middlewares.append(correlation_id_middleware)
         logger.info("✓ Correlation ID tracking enabled")
 
-        # Security headers (logged after the TLS setup); same origin only for changes
+        # Security headers (logged after the TLS setup); the connector's own host names only while the login is off
+        # (DNS rebinding); same origin only for changes
+        web_ui = self.config.get('web_ui') or {}
+        origins = allowed_origins(web_ui.get('allowed_origins'))
+        login = bool((web_ui.get('authentication') or {}).get('enabled', False))
         self.app.middlewares.append(security_headers_middleware)
-        self.app.middlewares.append(same_origin_middleware(
-            allowed_origins((self.config.get('web_ui') or {}).get('allowed_origins'))))
+        self.app.middlewares.append(known_host_middleware(None if login else known_hosts(web_ui.get('allowed_hosts'),
+                                                                                           origins)))
+        self.app.middlewares.append(same_origin_middleware(origins))
         self.app.middlewares.append(read_only_middleware(self.read_only))
 
         @web.middleware
