@@ -30,12 +30,12 @@
   <section class="tiles" aria-label="Counters">
     <article class="tile">
       <div class="label">Rows written</div>
-      <div class="value" x-text="rowsWritten"></div>
-      <div class="sub">acknowledged by Zerobus since the start</div>
+      <div class="value" x-text="rowsWritten" :title="rowsWrittenExact"></div>
+      <div class="sub" x-text="rowsSince"></div>
     </article>
     <article class="tile">
       <div class="label">Queued</div>
-      <div class="value" x-text="queued"></div>
+      <div class="value" x-text="queued" :title="queuedExact"></div>
       <div class="sub">rows waiting for their table's writer</div>
     </article>
     <article class="tile">

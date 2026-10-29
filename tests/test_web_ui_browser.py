@@ -295,3 +295,30 @@ async def test_the_restart_banner_stays_in_view_after_a_save_at_the_bottom(tab):
     box = await banner.bounding_box()
     assert 0 <= box["y"] and box["y"] + box["height"] <= 700, box             # inside the window
     assert t.errors == []
+
+
+async def test_big_counters_are_compact_on_the_tiles_and_exact_on_hover(tab):
+    """After a year at 100 rows/s the count is ~3 billion: in full it overflows its tile."""
+    import json
+    t, _, _ = tab
+
+    async def health(route):
+        body = json.loads(await (await route.fetch()).text())
+        for h in body.values():
+            h["rows_written"] = 3_153_600_000 // max(len(body), 1)
+        await route.fulfill(json=body)
+
+    async def status(route):
+        body = json.loads(await (await route.fetch()).text())
+        body.update(backpressure_queue_size=950, bridge_started_at=1793223055026)
+        await route.fulfill(json=body)
+    await t.route("**/api/sparkplug/health", health)
+    await t.route("**/api/status", status)
+    await t.goto("/")
+    rows = t.locator(".tile", has_text="Rows written")
+    await playwright_api.expect(rows.locator(".value")).to_have_text("3.15B")
+    assert await rows.locator(".value").get_attribute("title") == "3,153,600,000"
+    await playwright_api.expect(t.locator(".tile", has_text="Queued").locator(".value")).to_have_text("950")
+    await playwright_api.expect(rows.locator(".sub")).to_contain_text("since the bridge started, ")
+    assert "2026" in await rows.locator(".sub").inner_text()
+    assert t.errors == []

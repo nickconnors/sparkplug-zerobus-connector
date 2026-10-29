@@ -40,11 +40,17 @@ document.addEventListener('alpine:init', () => {
     get canStartBridge() { return this.status.bridge_state === 'stopped'; },
     get canStopBridge() { return this.status.bridge_state === 'running'; },
 
-    get rowsWritten() {
-      const values = Object.values(this.health).map((h) => h.rows_written || 0);
-      return window.fmt.number(values.reduce((a, b) => a + b, 0));
+    get rowsWrittenCount() {
+      return Object.values(this.health).map((h) => h.rows_written || 0).reduce((a, b) => a + b, 0);
     },
-    get queued() { return window.fmt.number(this.status.backpressure_queue_size); },
+    get rowsWritten() { return window.fmt.compact(this.rowsWrittenCount); },
+    get rowsWrittenExact() { return window.fmt.number(this.rowsWrittenCount); },
+    get rowsSince() {   // each Start or Restart is a new bridge: its counters start at 0
+      const t = this.status.bridge_started_at;
+      return 'acknowledged by Zerobus since the bridge started' + (t ? ', ' + window.fmt.dateTime(t) : '');
+    },
+    get queued() { return window.fmt.compact(this.status.backpressure_queue_size); },
+    get queuedExact() { return window.fmt.number(this.status.backpressure_queue_size); },
     get sourcesRunning() { return window.fmt.number(this.status.active_sources); },
     get sourcesNote() { return 'running of ' + window.fmt.number(this.status.configured_sources) + ' configured'; },
     get allEdgeNodes() {

@@ -252,3 +252,15 @@ async def test_the_shutdown_during_a_restart_s_drain_starts_no_new_bridge():
     await shutting
     assert made == [] and [e[0] for e in events] == ["start", "started", "stop", "stopped"]
     assert lifecycle.state == "stopped"
+
+
+async def test_the_status_says_when_the_bridge_started_and_a_restart_starts_again(site):
+    """The counters count from the bridge's start (each Start or Restart is a new bridge): the page says since when."""
+    import time
+    http, _, server = site
+    first = (await status(http))["bridge_started_at"]
+    assert abs(first / 1000 - time.time()) < 30
+    await asyncio.sleep(0.01)
+    assert (await post(http, "/api/bridge/restart"))[0] == 200
+    await wait_for(lambda: server.lifecycle.state == "running" and server.bridge.running, 5)
+    assert (await status(http))["bridge_started_at"] > first

@@ -151,6 +151,7 @@ class Bridge:
         self.running = False
         self._starting = False
         self._start_lock = asyncio.Lock()
+        self.started_at: Optional[float] = None    # epoch s: the counters count from here (a restart: a new bridge)
 
         logger.info(f"Bridge initialized: {len(self.sources)} sources configured")
 
@@ -180,6 +181,7 @@ class Bridge:
 
         self.running = True
         self._starting = False
+        self.started_at = time.time()
         logger.info("✓ Bridge infrastructure started")
 
     async def start(self):
@@ -1057,6 +1059,7 @@ class Bridge:
             'active_sources': len(self.clients),
             'bridge_running': bool(getattr(self, 'running', False)),
             'bridge_starting': bool(getattr(self, '_starting', False)) and not bool(getattr(self, 'running', False)),
+            'bridge_started_at': None if self.started_at is None else int(self.started_at * 1000),   # epoch ms
             'zerobus_config_enabled': self.zerobus_config_enabled,
             'zerobus_connected': bool(self.tables),
             'zerobus_enabled': self.zerobus_enabled,

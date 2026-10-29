@@ -86,6 +86,11 @@
     number(n) {
       return typeof n === 'number' ? n.toLocaleString() : '–';
     },
+    compact(n) {     // for the tiles: 3.15B, not 3,153,600,000 (which overflows a tile); exact below a million
+      if (typeof n !== 'number') return '–';
+      if (Math.abs(n) < 1e6) return n.toLocaleString();
+      return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).format(n);
+    },
     dateTime(ms) {
       if (!ms) {
         return '–';
