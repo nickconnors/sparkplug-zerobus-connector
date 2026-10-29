@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 HEALTHY_SESSION_S = 60.0   # a source connection that lasted this long starts its reconnect backoff again
 NBIRTH_SOURCES_KEPT = 10000   # NBIRTH msg_ids remembered with their source, for the NBIRTH callers (_owns_nbirth)
+# (an NBIRTH forgotten before Zerobus acknowledged it goes to the first caller on its writer: with sources sharing a
+# table, more than this many NBIRTHs awaiting Zerobus at once could send one to the other source's procedures)
 
 
 def _iso_ms(ms: Optional[float]) -> Optional[str]:
@@ -667,20 +669,21 @@ class Bridge:
         return None
 
     async def _run_diagnostics(self) -> None:
-        """The diagnostics' births at start, then every 10 s a DDATA per diagnostics edge node if anything changed."""
+        """The diagnostics' births at start, then every 10 s a DDATA per diagnostics edge node if anything changed.
+        An error is logged and the next turn tries again (the births until they are queued)."""
         queue = self.backpressure                   # the default table's
         logger.info(f"Diagnostics: edge nodes in group {self.diagnostics.group_id}, into the default table")
-        rows = self.diagnostics.start_rows()
+        born = False
         while True:
-            for row in rows:
-                self._enqueue_fast(row.to_zerobus_record(), queue)
-            self.diagnostics_rows += len(rows)
-            await asyncio.sleep(REFRESH_S)
             try:
-                rows = self.diagnostics.refresh_rows()
-            except Exception as e:  # noqa: BLE001 - the next refresh tries again
-                logger.warning(f"Diagnostics: refresh failed: {type(e).__name__}: {e}")
-                rows = []
+                rows = self.diagnostics.refresh_rows() if born else self.diagnostics.start_rows()
+                for row in rows:
+                    self._enqueue_fast(row.to_zerobus_record(), queue)
+                self.diagnostics_rows += len(rows)
+                born = True
+            except Exception as e:  # noqa: BLE001 - the next turn tries again
+                logger.warning(f"Diagnostics: {'refresh' if born else 'the births'} failed: {type(e).__name__}: {e}")
+            await asyncio.sleep(REFRESH_S)
 
     def _on_raw_row(self, row: "raw_row.RawRow", queue: BackpressureManager) -> None:
         self.metrics['records_received'] += 1

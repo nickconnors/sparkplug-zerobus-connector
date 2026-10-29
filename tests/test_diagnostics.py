@@ -232,3 +232,28 @@ async def test_diagnostics_are_off_by_default(tmp_path, fake_streams):
     finally:
         await bridge.stop()
     assert bridge.diagnostics is None and not [r for r in _written(fake_streams) if r["group_id"] == "BRIDGE"]
+
+
+async def test_the_diagnostics_go_on_after_their_births_fail(tmp_path, fake_streams, monkeypatch, caplog):
+    """R2-6: an error building the births (or queuing a row) ended the diagnostics task, silently: now logged, and
+    the next turn tries again."""
+    monkeypatch.setattr(core_bridge, "REFRESH_S", 0.05)
+    cfg = bridge_config(tmp_path)
+    cfg["diagnostics"] = {"enabled": True}
+    bridge = core_bridge.Bridge(cfg)
+    start_rows, calls = bridge.diagnostics.start_rows, []
+
+    def failing_once():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("no births this time")
+        return start_rows()
+    bridge.diagnostics.start_rows = failing_once
+    await bridge.start_infra()
+    try:
+        await wait_for(lambda: [r for r in _written(fake_streams) if r["group_id"] == "BRIDGE"], 5)
+    finally:
+        await bridge.stop()
+    births = [(r["message_type"], r["edge_node_id"]) for r in _written(fake_streams) if r["group_id"] == "BRIDGE"]
+    assert births[:2] == [("NBIRTH", "Bridge Info"), ("DBIRTH", "Bridge Info")] and len(calls) == 2
+    assert "no births this time" in caplog.text
