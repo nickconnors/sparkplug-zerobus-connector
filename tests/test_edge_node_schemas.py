@@ -21,9 +21,9 @@ from sparkplug_connector.sparkplug.edge_node_schemas import (
     retry_delay,
 )
 
-RAW = "cat.stage_db.sparkplug_raw"
-V1 = "v1.stage_db.create_edge_node_schema"
-SDP = "sdp.stage_db.create_edge_node_schema"
+RAW = "cat.bronze.raw_messages"
+V1 = "v1.bronze.create_edge_node_schema"
+SDP = "sdp.bronze.create_edge_node_schema"
 
 
 class FakeSql:
@@ -101,8 +101,8 @@ async def test_an_nbirth_is_checked_readable_then_every_procedure_is_called():
     n.accept([row("DDATA", "G", "E", "d1"), row("NBIRTH", "G", "E", "n1"), row("DBIRTH", "G", "E", "b1")])
     await wait_until(lambda: len(sql.calls()) == 2)
     assert sql.log == ["check n1", "check n1", "check n1",
-                       "CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",
-                       "CALL sdp.stage_db.create_edge_node_schema(nb, G, E, false)"]
+                       "CALL v1.bronze.create_edge_node_schema(nb, G, E, false)",
+                       "CALL sdp.bronze.create_edge_node_schema(nb, G, E, false)"]
     s = n.status()
     assert (s.births, s.calls, s.failures, s.gave_up, s.pending, s.last_error) == (1, 2, 0, 0, 0, None)
     await n.stop()
@@ -124,8 +124,8 @@ async def test_a_burst_of_nbirths_of_one_edge_node_is_one_call_for_the_latest():
     n.accept([row("NBIRTH", "G", "E", "n2")])
     await wait_until(lambda: len(sql.calls()) == 2)
     await asyncio.sleep(0.4)
-    assert sorted(sql.calls()) == ["CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",
-                                   "CALL v1.stage_db.create_edge_node_schema(nb, G, E2, false)"]
+    assert sorted(sql.calls()) == ["CALL v1.bronze.create_edge_node_schema(nb, G, E, false)",
+                                   "CALL v1.bronze.create_edge_node_schema(nb, G, E2, false)"]
     assert "check n2" in sql.log and "check n1" not in sql.log
     assert n.status().births == 3
     await n.stop()
@@ -145,9 +145,9 @@ async def test_a_failed_call_is_retried_and_procedures_already_done_arent_called
     sql.fail_calls = 1                                      # the first procedure's first CALL fails
     n = BirthNotifier(sql, RAW, [V1, SDP], coalesce_s=0, sleep=no_sleep)
     await run_directly(n, Birth("G", "E", "n1"))
-    assert sql.calls() == ["CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",       # failed
-                           "CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",       # retried
-                           "CALL sdp.stage_db.create_edge_node_schema(nb, G, E, false)"]
+    assert sql.calls() == ["CALL v1.bronze.create_edge_node_schema(nb, G, E, false)",       # failed
+                           "CALL v1.bronze.create_edge_node_schema(nb, G, E, false)",       # retried
+                           "CALL sdp.bronze.create_edge_node_schema(nb, G, E, false)"]
     s = n.status()
     assert (s.failures, s.calls, s.pending) == (1, 2, 0) and "PERMISSION_DENIED" in s.last_error
 
@@ -166,7 +166,7 @@ def test_retry_delays_back_off_to_two_minutes():
 
 
 def test_the_raw_table_must_be_a_three_part_name():
-    for name in ("sparkplug_raw; DROP TABLE x", "s.sparkplug_raw", "c..t", "c.s.t`; DROP TABLE x; --", "c.s.t\nx"):
+    for name in ("raw_messages; DROP TABLE x", "s.raw_messages", "c..t", "c.s.t`; DROP TABLE x; --", "c.s.t\nx"):
         with pytest.raises(ValueError):
             BirthNotifier(FakeSql(), name, [V1])
 
@@ -179,20 +179,20 @@ async def test_the_raw_table_is_quoted_so_any_unity_catalog_name_works():
             statements.append(statement)
             return [["1"]]
 
-    n = BirthNotifier(Sql(), "my-catalog.stage_db.sparkplug_raw", [V1], coalesce_s=0, sleep=no_sleep)
+    n = BirthNotifier(Sql(), "my-catalog.bronze.raw_messages", [V1], coalesce_s=0, sleep=no_sleep)
     n.accept([row("NBIRTH", "G", "E", "n1")])
     await wait_until(lambda: len(statements) >= 2)
-    assert statements[0] == "SELECT count(*) FROM `my-catalog`.`stage_db`.`sparkplug_raw` WHERE msg_id = :msg_id"
+    assert statements[0] == "SELECT count(*) FROM `my-catalog`.`bronze`.`raw_messages` WHERE msg_id = :msg_id"
     await n.stop()
 
 
 async def test_a_procedure_of_your_own_is_called_with_the_same_arguments():
     sql = FakeSql()
-    n = BirthNotifier(sql, RAW, ["ops.hooks.on_nbirth", "`my-cat`.stage_db.`build views`"], coalesce_s=0, sleep=no_sleep)
+    n = BirthNotifier(sql, RAW, ["ops.hooks.on_nbirth", "`my-cat`.bronze.`build views`"], coalesce_s=0, sleep=no_sleep)
     n.accept([row("NBIRTH", "G", "E", "n1")])
     await wait_until(lambda: len(sql.calls()) == 2)
     assert sql.calls() == ["CALL ops.hooks.on_nbirth(nb, G, E, false)",
-                           "CALL `my-cat`.stage_db.`build views`(nb, G, E, false)"]
+                           "CALL `my-cat`.bronze.`build views`(nb, G, E, false)"]
     await n.stop()
 
 
@@ -211,7 +211,7 @@ def test_node_schemas_is_refused_with_the_new_name():
 
 @pytest.mark.parametrize("name", [
     "create_edge_node_schema",                          # not three parts
-    "stage_db.create_edge_node_schema",
+    "bronze.create_edge_node_schema",
     "a.b.c.d",
     "a..p",
     "a.b.p(1); DROP TABLE x; --",                       # the name goes into the statement's text
@@ -303,7 +303,7 @@ def test_names_as_the_procedure_makes_them():
 
 async def test_an_nbirth_with_models_is_checked_for_its_views_in_the_procedures_catalog():
     sql = FakeSql(models=("motor", "pump_udt"))
-    n = BirthNotifier(sql, RAW, [V1, "`node-db`.stage_db.create_edge_node_schema"], coalesce_s=0, sleep=no_sleep)
+    n = BirthNotifier(sql, RAW, [V1, "`node-db`.bronze.create_edge_node_schema"], coalesce_s=0, sleep=no_sleep)
     n.accept([row("NBIRTH", "Plant 1", "Line-A", "n1", nbirth_msg("Motor", "Pump UDT"))])
     await wait_until(lambda: n.status().checked == 2)
     assert sql.lookups == [("v1", "nb_plant_1_line_a"), ("`node-db`", "nb_plant_1_line_a")]
@@ -317,9 +317,9 @@ async def test_missing_views_fail_the_attempt_and_the_procedure_is_called_again(
     sql.calls_making_nothing = 1                            # the first CALL returns without making anything
     n = BirthNotifier(sql, RAW, [V1, SDP], coalesce_s=0, sleep=no_sleep)
     await run_directly(n, Birth("G", "E", "n1", ("motor",)))
-    assert sql.calls() == ["CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",       # made nothing
-                           "CALL v1.stage_db.create_edge_node_schema(nb, G, E, false)",       # called again
-                           "CALL sdp.stage_db.create_edge_node_schema(nb, G, E, false)"]
+    assert sql.calls() == ["CALL v1.bronze.create_edge_node_schema(nb, G, E, false)",       # made nothing
+                           "CALL v1.bronze.create_edge_node_schema(nb, G, E, false)",       # called again
+                           "CALL sdp.bronze.create_edge_node_schema(nb, G, E, false)"]
     s = n.status()
     assert (s.calls, s.checked, s.failures, s.gave_up) == (3, 2, 1, 0)
     assert "v1.nb_g_e lacks motor, motor_vw, motor_asof_vw" in s.last_error
@@ -431,7 +431,7 @@ async def test_an_nbirth_the_notifier_doesnt_own_calls_nothing():
     n.accept([row("NBIRTH", "G", "E1", "theirs"), row("NBIRTH", "G", "E2", "mine")])
     await wait_until(lambda: n.status().checked == 1)
     await asyncio.sleep(0.1)
-    assert sql.calls() == ["CALL v1.stage_db.create_edge_node_schema(nb, G, E2, false)"]
+    assert sql.calls() == ["CALL v1.bronze.create_edge_node_schema(nb, G, E2, false)"]
     assert n.status().births == 1
     await n.stop()
 

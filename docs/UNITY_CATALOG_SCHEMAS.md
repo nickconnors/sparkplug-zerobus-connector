@@ -2,7 +2,7 @@
 
 The table the connector writes: one row per Sparkplug B message, through Zerobus.
 
-### Table: `bridge_stage_db.stage_db.sparkplug_raw`
+### Table: `sparkplug.bronze.raw_messages`
 
 **Purpose:** Bronze layer for Sparkplug B: one row per Sparkplug message (births, deaths and data of edge
 nodes and devices), the payload kept whole as Eclipse Tahu's JSON. The connector's `sparkplug` source writes
@@ -11,7 +11,11 @@ it (`sparkplug_connector/sparkplug/README.md`); the names are an example, any ca
 
 **Schema:**
 ```sql
-CREATE TABLE IF NOT EXISTS bridge_stage_db.stage_db.sparkplug_raw (
+-- or an existing catalog and schema (then change the names below and in the configuration)
+CREATE CATALOG IF NOT EXISTS sparkplug;
+CREATE SCHEMA IF NOT EXISTS sparkplug.bronze;
+
+CREATE TABLE IF NOT EXISTS sparkplug.bronze.raw_messages (
     msg_id STRING COMMENT 'A new UUID per row',
     msg_topic STRING COMMENT 'The MQTT topic: spBv1.0/<group>/<type>/<edge node>[/<device>]',
     namespace STRING COMMENT 'spBv1.0',
@@ -48,9 +52,9 @@ decoded get no row (they're counted in `GET /api/sparkplug/health`).
 
 **Grants** for the service principal that writes it:
 ```sql
-GRANT USE CATALOG ON CATALOG bridge_stage_db TO `<application id>`;
-GRANT USE SCHEMA ON SCHEMA bridge_stage_db.stage_db TO `<application id>`;
-GRANT MODIFY, SELECT ON TABLE bridge_stage_db.stage_db.sparkplug_raw TO `<application id>`;
+GRANT USE CATALOG ON CATALOG sparkplug TO `<application id>`;
+GRANT USE SCHEMA ON SCHEMA sparkplug.bronze TO `<application id>`;
+GRANT MODIFY, SELECT ON TABLE sparkplug.bronze.raw_messages TO `<application id>`;
 ```
 
 **Sample Query:** the plain metrics of DDATA messages, one row per metric. A `Template` metric (a UDT
@@ -64,7 +68,7 @@ SELECT
     m.value:name::STRING AS metric,
     m.value:dataType::STRING AS data_type,
     m.value:value AS value
-FROM bridge_stage_db.stage_db.sparkplug_raw AS r,
+FROM sparkplug.bronze.raw_messages AS r,
      LATERAL variant_explode(r.msg:metrics) AS m
 WHERE r.message_type = 'DDATA'
   AND m.value:dataType::STRING <> 'Template'
@@ -84,7 +88,7 @@ SELECT
     t.value:name::STRING AS member,
     t.value:dataType::STRING AS data_type,
     t.value:value AS value
-FROM bridge_stage_db.stage_db.sparkplug_raw AS r,
+FROM sparkplug.bronze.raw_messages AS r,
      LATERAL variant_explode(r.msg:metrics) AS m,
      LATERAL variant_explode(m.value:value:metrics) AS t
 WHERE r.message_type = 'DDATA'
@@ -96,7 +100,7 @@ LIMIT 100;
 ## Recreating the table
 
 ```sql
-DROP TABLE IF EXISTS bridge_stage_db.stage_db.sparkplug_raw;
+DROP TABLE IF EXISTS sparkplug.bronze.raw_messages;
 -- then the CREATE TABLE statement above
 ```
 
@@ -104,5 +108,6 @@ DROP TABLE IF EXISTS bridge_stage_db.stage_db.sparkplug_raw;
 
 | Date | Version | Changes |
 |------|---------|---------|
+| 2026-10-29 | 3.1 | The example names: `sparkplug.bronze.raw_messages` |
 | 2026-10-22 | 3.0 | Sparkplug B only: the other protocols' tables removed with their sources |
-| 2026-10-21 | 2.1 | Sparkplug B: the `sparkplug_raw` table |
+| 2026-10-21 | 2.1 | Sparkplug B: the raw table |

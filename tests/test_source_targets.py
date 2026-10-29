@@ -12,7 +12,7 @@ from test_web_sources import page, saved, started  # noqa: F401 - fixtures
 from test_zerobus_restart import hosts  # noqa: F401 - a fixture
 from sparkplug_connector.core import bridge as core_bridge, targets
 
-DEFAULT = "example.c.s.sparkplug_raw"
+DEFAULT = "example.c.s.raw_messages"
 
 
 def sparkplug(name="sp", **extra):
@@ -22,8 +22,8 @@ def sparkplug(name="sp", **extra):
 # ----------------------------------------------------------------------------- the rules
 
 def test_a_target_table_is_catalog_schema_table():
-    assert targets.parse_target_table(" my-cat.stage_db.sparkplug_raw ") == ("my-cat", "stage_db", "sparkplug_raw")
-    for bad in ("sparkplug_raw", "s.t", "a.b.c.d", "a..t", "a.b.t x", "a.b.`t`"):
+    assert targets.parse_target_table(" my-cat.bronze.raw_messages ") == ("my-cat", "bronze", "raw_messages")
+    for bad in ("raw_messages", "s.t", "a.b.c.d", "a..t", "a.b.t x", "a.b.`t`"):
         with pytest.raises(ValueError, match="catalog.schema.table"):
             targets.parse_target_table(bad)
 
@@ -53,11 +53,11 @@ async def test_each_source_writes_its_own_table(tmp_path, monkeypatch, hosts):
 
     monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
     cfg = bridge_config(tmp_path)
-    cfg["sources"] = [sparkplug(target_table="c.s.sparkplug_raw_2"), sparkplug("other")]
+    cfg["sources"] = [sparkplug(target_table="c.s.raw_messages_2"), sparkplug("other")]
     bridge = core_bridge.Bridge(cfg)
     await bridge.start()
     try:
-        assert sorted(bridge.writers) == [DEFAULT, "example.c.s.sparkplug_raw_2"]
+        assert sorted(bridge.writers) == [DEFAULT, "example.c.s.raw_messages_2"]
         own, default = rows("A", 2), rows("B", 3)
         for r in own:
             bridge._on_record(r, "sp")
@@ -67,7 +67,7 @@ async def test_each_source_writes_its_own_table(tmp_path, monkeypatch, hosts):
     finally:
         await bridge.stop()
     written = {table: [json.loads(j)["msg_id"] for b in s.ingested for j in b] for table, s in streams.items()}
-    assert written == {"c.s.sparkplug_raw_2": [r.msg_id for r in own], "c.s.sparkplug_raw": [r.msg_id for r in default]}
+    assert written == {"c.s.raw_messages_2": [r.msg_id for r in own], "c.s.raw_messages": [r.msg_id for r in default]}
 
 
 async def test_a_source_with_a_malformed_target_table_isnt_started(tmp_path, fake_streams, hosts):
@@ -117,5 +117,5 @@ async def test_a_renamed_source_keeps_its_table(page, started):
     async with http.put("/api/sources/sp", json={"name": "sp-renamed", "protocol": "sparkplug",
                                                  "endpoint": "mqtt://localhost:1883", "enabled": True}) as r:
         assert r.status == 200, await r.text()
-    assert "sp-renamed" in saved(path) and saved(path)["sp-renamed"]["target_table"] == "c.s.sparkplug_raw"
+    assert "sp-renamed" in saved(path) and saved(path)["sp-renamed"]["target_table"] == "c.s.raw_messages"
     assert bridge._get_target_for_source("sp-renamed") == table

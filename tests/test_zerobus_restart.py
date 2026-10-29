@@ -19,7 +19,7 @@ from sparkplug_connector.sparkplug.edge_node_schemas import birth_models
 from sparkplug_connector.protocols.base import ProtocolType
 from sparkplug_connector.sparkplug.raw_row import convert
 
-TARGET = "example.c.s.sparkplug_raw"
+TARGET = "example.c.s.raw_messages"
 NBIRTH = (FIXTURES / "transmission" / "nbirth-1.bin").read_bytes()
 
 

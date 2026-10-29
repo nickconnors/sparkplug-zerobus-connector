@@ -161,7 +161,7 @@ async def test_the_zerobus_page_calls_out_the_secrets_variable(tab, monkeypatch,
     assert await t.locator("input[type=password]").count() == 0                 # no field for a secret's value
     await t.fill("#z-host", "https://example.cloud.databricks.com")
     await t.fill("#z-endpoint", "123.zerobus.us-east-1.cloud.databricks.com")
-    await t.fill("#z-table", "c.s.sparkplug_raw")
+    await t.fill("#z-table", "c.s.raw_messages")
     await t.click("button[type=submit] >> text=Save")
     await t.wait_for_selector(".toast")
     assert yaml.safe_load(path.read_text())["zerobus"]["auth"]["client_secret"] == "${env:DATABRICKS_CLIENT_SECRET}"
@@ -257,7 +257,7 @@ async def test_a_zerobus_save_keeps_a_secret_the_page_did_not_set(tab, monkeypat
     await playwright_api.expect(t.locator(".secret-env + small")).to_have_text(note)
     await t.fill("#z-host", "https://example.cloud.databricks.com")
     await t.fill("#z-endpoint", "123.zerobus.us-east-1.cloud.databricks.com")
-    await t.fill("#z-table", "c.s.sparkplug_raw")
+    await t.fill("#z-table", "c.s.raw_messages")
     await t.click("button[type=submit] >> text=Save")
     await t.wait_for_selector(".toast")
     saved = yaml.safe_load(path.read_text())["zerobus"]
@@ -305,7 +305,7 @@ async def test_big_counters_are_compact_on_the_tiles_and_exact_on_hover(tab):
     async def status(route):
         body = json.loads(await (await route.fetch()).text())
         body.update(backpressure_queue_size=950, bridge_started_at=1793223055026)
-        body["metrics"]["zerobus_targets"] = {"w.c.s.sparkplug_raw": {"written": 3_153_600_000}}
+        body["metrics"]["zerobus_targets"] = {"w.c.s.raw_messages": {"written": 3_153_600_000}}
         await route.fulfill(json=body)
     await t.route("**/api/status", status)
     await t.goto("/")
@@ -333,7 +333,7 @@ async def test_rows_written_counts_a_table_shared_by_sources_once(tab):
 
     async def status(route):
         body = json.loads(await (await route.fetch()).text())
-        body["metrics"]["zerobus_targets"] = {"w.c.s.sparkplug_raw": {"written": 700}}
+        body["metrics"]["zerobus_targets"] = {"w.c.s.raw_messages": {"written": 700}}
         await route.fulfill(json=body)
     await t.route("**/api/sparkplug/health", health)
     await t.route("**/api/status", status)

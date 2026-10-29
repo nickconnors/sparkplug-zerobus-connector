@@ -21,7 +21,7 @@ async def test_a_table_whose_streams_cant_be_set_up_gets_no_writer_and_its_host_
     await bridge.start()
     try:
         assert bridge.writers == {} and bridge.tables == {}
-        assert "Failed to set up the ZeroBus target example.c.s.sparkplug_raw: no Zerobus SDK" in caplog.text
+        assert "Failed to set up the ZeroBus target example.c.s.raw_messages: no Zerobus SDK" in caplog.text
         assert await bridge.host_supervisors["sp"].tick() == "OFFLINE"     # nothing is being written
     finally:
         await bridge.stop()

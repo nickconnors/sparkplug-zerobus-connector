@@ -78,6 +78,6 @@ async def test_a_disabled_source_s_table_is_opened_when_it_is_enabled_and_starte
         await bridge.update_source("sparkplug-example", {**source, "enabled": True})
         assert (await bridge.start_source("sparkplug-example"))["status"] == "ok"
         assert [name for name, _ in started] == ["sparkplug-example"]
-        assert "example.bridge_stage_db.stage_db.sparkplug_raw" in bridge.writers
+        assert "example.sparkplug.bronze.raw_messages" in bridge.writers
     finally:
         await bridge.stop()

@@ -222,7 +222,7 @@ async def test_rows_from_a_broker_equal_java_tahu(broker):
     assert client.counters["skipped_foreign_topic"] == 0
 
 
-async def test_bridge_queues_sparkplug_rows_with_the_sparkplug_raw_columns(broker):
+async def test_bridge_queues_sparkplug_rows_with_the_raw_messages_columns(broker):
     endpoint, _port = broker
     bridge = Bridge({
         "sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": endpoint, "client_id": "bridge-test", **KEEP_ALL}],

@@ -175,7 +175,7 @@ async def connector(*sources: dict[str, Any], online_timeout: float = 20.0) -> A
             "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                         "auth": {"client_id": "id", "client_secret": "secret"},
                         "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c",
-                                           "schema": "s", "table": "sparkplug_raw"}},
+                                           "schema": "s", "table": "raw_messages"}},
             "backpressure": {},
         })
         await bridge.start()

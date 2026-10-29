@@ -383,14 +383,14 @@ async def test_zerobus_row_streams_open_a_json_stream_to_the_table_and_hand_on_t
             return FakeSdkStream()
 
     monkeypatch.setattr(sdk, "ZerobusSdk", FakeSdk)
-    streams = ZerobusRowStreams("https://example.zerobus", "https://example.cloud.databricks.com", "c.s.sparkplug_raw",
+    streams = ZerobusRowStreams("https://example.zerobus", "https://example.cloud.databricks.com", "c.s.raw_messages",
                                 "id", "secret")
     stream = await streams.open()
     assert await stream.ingest(['{"msg_id":"a"}', '{"msg_id":"b"}']) == 41
     await stream.wait_for(41)
     await stream.close()
     assert calls == [("sdk", "https://example.zerobus", "https://example.cloud.databricks.com"),
-                     ("create", "id", "secret", "c.s.sparkplug_raw", RecordType.JSON),
+                     ("create", "id", "secret", "c.s.raw_messages", RecordType.JSON),
                      ("ingest", ['{"msg_id":"a"}', '{"msg_id":"b"}']), ("wait", 41), ("close",)]
 
 
@@ -428,7 +428,7 @@ async def test_bridge_writes_sparkplug_rows_through_the_confirmed_writer(monkeyp
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c",
-                                       "schema": "s", "table": "sparkplug_raw"}},
+                                       "schema": "s", "table": "raw_messages"}},
         "backpressure": {},
     })
     await bridge.start_infra()

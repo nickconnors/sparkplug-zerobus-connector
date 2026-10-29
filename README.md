@@ -4,7 +4,7 @@ A connector that subscribes to an MQTT server carrying **Sparkplug B** (for exam
 Transmission publishing to a Chariot MQTT server, or any Sparkplug 3.0 edge) and writes **one
 row per Sparkplug message** to a Delta table through [Zerobus Ingest](https://docs.databricks.com/aws/en/ingestion/zerobus-overview).
 
-- **One row per message** in a `sparkplug_raw` table: the topic split into columns, the payload as Eclipse
+- **One row per message** in a `raw_messages` table: the topic split into columns, the payload as Eclipse
   Tahu's JSON (byte for byte what Java Tahu produces, plus Ignition's extra types, as an Ignition-aware Java host
   decodes them) in a `VARIANT` column. Splitting it into metrics is left to SQL ([docs/UNITY_CATALOG_SCHEMAS.md](docs/UNITY_CATALOG_SCHEMAS.md) has sample queries).
 - **Sparkplug primary host application** (optional): ONLINE only while Databricks accepts the rows, so the
@@ -50,16 +50,20 @@ A table, and a service principal with an OAuth secret that may write it (names a
 schema and table work):
 
 ```sql
-CREATE TABLE IF NOT EXISTS bridge_stage_db.stage_db.sparkplug_raw (
+-- or an existing catalog and schema (then change the names below and in the configuration)
+CREATE CATALOG IF NOT EXISTS sparkplug;
+CREATE SCHEMA IF NOT EXISTS sparkplug.bronze;
+
+CREATE TABLE IF NOT EXISTS sparkplug.bronze.raw_messages (
   msg_id STRING, msg_topic STRING, namespace STRING, group_id STRING, message_type STRING,
   edge_node_id STRING, device_id STRING, msg VARIANT, inserted_at DECIMAL(38,0)
 )
 CLUSTER BY (message_type, group_id, edge_node_id, device_id)
 TBLPROPERTIES ('delta.enableChangeDataFeed' = 'true');
 
-GRANT USE CATALOG ON CATALOG bridge_stage_db TO `<application id>`;
-GRANT USE SCHEMA ON SCHEMA bridge_stage_db.stage_db TO `<application id>`;
-GRANT MODIFY, SELECT ON TABLE bridge_stage_db.stage_db.sparkplug_raw TO `<application id>`;
+GRANT USE CATALOG ON CATALOG sparkplug TO `<application id>`;
+GRANT USE SCHEMA ON SCHEMA sparkplug.bronze TO `<application id>`;
+GRANT MODIFY, SELECT ON TABLE sparkplug.bronze.raw_messages TO `<application id>`;
 ```
 
 The column comments and sample queries are in [docs/UNITY_CATALOG_SCHEMAS.md](docs/UNITY_CATALOG_SCHEMAS.md);

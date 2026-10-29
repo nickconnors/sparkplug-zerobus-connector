@@ -35,7 +35,7 @@ sources:
   protocol: sparkplug
   enabled: true
   endpoint: '${{env:SPTEST_ENDPOINT:mqtt://localhost:1883}}'
-  target_table: c.s.sparkplug_raw
+  target_table: c.s.raw_messages
   client_id: pyc
   username: sparkplug-user
   password: '${{env:SPTEST_PASSWORD}}'
@@ -196,7 +196,7 @@ async def test_the_api_masks_passwords_and_secrets(page):
 async def test_a_sparkplug_source_added_from_the_page_keeps_its_settings(page, started):
     http, path, bridge = page
     form = {"name": "sp2", "protocol": "sparkplug", "endpoint": "mqtt://chariot:1883", "enabled": True,
-            "target_table": "c.s.sparkplug_raw",
+            "target_table": "c.s.raw_messages",
             "primary_host_id": "h", "state_format": "v2", "offline_after_seconds": 10,
             "edge_node_schemas": {"enabled": True, "warehouse_id": "w", "procedures": ["x.y.on_nbirth"], "schema_prefix": ""}}
     async with http.post("/api/sources", json=form) as r:

@@ -186,7 +186,7 @@ def bridge_config(tmp_path, max_queue: int = 1000) -> dict:
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c",
-                                       "schema": "s", "table": "sparkplug_raw"},
+                                       "schema": "s", "table": "raw_messages"},
                     "wal": {"enabled": "true", "path": str(tmp_path / "wal"), "fsync_interval_seconds": 0.05},
                     "batch": {"linger_seconds": 0.02}, "drain_timeout_seconds": 5},
         "backpressure": {"memory_queue": {"max_size": max_queue, "drop_policy": "oldest"}},
@@ -225,7 +225,7 @@ async def test_rows_queued_when_the_process_dies_are_written_after_the_restart(t
     sent = rows("A", 4)
     for r in sent:
         first._on_record(r)
-    assert first.get_metrics()["wal"]["example.c.s.sparkplug_raw"]["pending"] == 4
+    assert first.get_metrics()["wal"]["example.c.s.raw_messages"]["pending"] == 4
     await crash(first)
 
     fake_streams.fail_opens = 0
@@ -237,16 +237,16 @@ async def test_rows_queued_when_the_process_dies_are_written_after_the_restart(t
     written = [json.loads(j) for batch in fake_streams.ingested for j in batch]
     assert ids(written) == [r.msg_id for r in sent + later]   # the replayed rows first, same msg_id
     assert all(SEQ_FIELD not in w for w in written)
-    status = second.get_metrics()["wal"]["example.c.s.sparkplug_raw"]
+    status = second.get_metrics()["wal"]["example.c.s.raw_messages"]
     assert status["rows_replayed"] == 4 and status["pending"] == 0 and status["checkpoint"] == 5
 
     batches = len(fake_streams.ingested)
     third = core_bridge.Bridge(bridge_config(tmp_path))      # after a clean stop: nothing to replay
     await third.start_infra()
     await third.stop()
-    assert third.get_metrics()["wal"]["example.c.s.sparkplug_raw"]["rows_replayed"] == 0
+    assert third.get_metrics()["wal"]["example.c.s.raw_messages"]["rows_replayed"] == 0
     assert len(fake_streams.ingested) == batches
-    assert segments(tmp_path / "wal" / "example.c.s.sparkplug_raw") == []
+    assert segments(tmp_path / "wal" / "example.c.s.raw_messages") == []
 
 
 async def test_a_batch_in_flight_when_the_process_dies_is_written_again(tmp_path, fake_streams):
@@ -268,7 +268,7 @@ async def test_a_batch_in_flight_when_the_process_dies_is_written_again(tmp_path
 
 @pytest.mark.parametrize("drop_policy", ["oldest", "reject"])
 async def test_more_rows_to_replay_than_the_queue_holds_are_all_written_first(tmp_path, fake_streams, drop_policy):
-    log = WriteAheadLog(tmp_path / "wal" / "example.c.s.sparkplug_raw")
+    log = WriteAheadLog(tmp_path / "wal" / "example.c.s.raw_messages")
     log.open()
     sent = rows("A", 10)
     for r in sent:                                          # as the bridge logs a Sparkplug row
@@ -279,13 +279,13 @@ async def test_more_rows_to_replay_than_the_queue_holds_are_all_written_first(tm
     cfg["backpressure"]["memory_queue"]["drop_policy"] = drop_policy
     bridge = core_bridge.Bridge(cfg)
     await bridge.start_infra()
-    assert "example.c.s.sparkplug_raw" in bridge.writers   # set up despite the small queue
+    assert "example.c.s.raw_messages" in bridge.writers   # set up despite the small queue
     later = rows("A", 1)
     bridge._on_record(later[0])
     await bridge.stop()
     written = ids(json.loads(j) for batch in fake_streams.ingested for j in batch)
     assert written == [r.msg_id for r in sent + later]     # none dropped, the replayed rows first
-    status = bridge.get_metrics()["wal"]["example.c.s.sparkplug_raw"]
+    status = bridge.get_metrics()["wal"]["example.c.s.raw_messages"]
     assert status["pending"] == 0 and status["checkpoint"] == 11
     assert bridge.get_metrics()["backpressure"]["records_dropped"] == 0
 
@@ -304,7 +304,7 @@ async def test_a_row_the_log_cant_write_is_still_queued_and_written(tmp_path, fa
     bridge._on_record(sent[2])
     await bridge.stop()
     assert ids(json.loads(j) for batch in fake_streams.ingested for j in batch) == [r.msg_id for r in sent]
-    status = bridge.get_metrics()["wal"]["example.c.s.sparkplug_raw"]
+    status = bridge.get_metrics()["wal"]["example.c.s.raw_messages"]
     assert (status["rows_not_logged"], status["pending"], status["checkpoint"]) == (1, 0, 2)
 
 
@@ -312,7 +312,7 @@ async def test_rows_of_a_take_cancelled_part_way_are_written_by_the_next_writer(
     """The writer task cancelled during a take (e.g. stop_zerobus after its wait): the
     rows it had taken from the queue were lost, and done in the log with the next writer's acknowledgement."""
     bridge = core_bridge.Bridge(bridge_config(tmp_path))
-    target = "example.c.s.sparkplug_raw"
+    target = "example.c.s.raw_messages"
     queue = bridge._queue(target)
     real, one_taken = queue.dequeue, asyncio.Event()
 
@@ -344,7 +344,7 @@ async def test_rows_the_queue_drops_are_done_in_the_log(tmp_path, fake_streams):
     await bridge.start_infra()
     for r in rows("A", 5):
         bridge._on_record(r)
-    log = bridge.wals["example.c.s.sparkplug_raw"]
+    log = bridge.wals["example.c.s.raw_messages"]
     await wait_for(lambda: log.status().checkpoint == 3)   # 1-3 dropped (oldest first), 4-5 queued
     assert log.status().pending == 2
     await crash(bridge)
@@ -355,7 +355,7 @@ async def test_a_row_the_queue_fails_to_take_is_dropped_and_done_in_the_log(tmp_
     outstanding in the log for good (the checkpoint stopped there: every later row replayed at each start)."""
     fake_streams.fail_opens = 10**6                       # nothing drains: the memory queue stays full
     bridge = core_bridge.Bridge(bridge_config(tmp_path, max_queue=1))
-    queue = bridge._queue("example.c.s.sparkplug_raw")
+    queue = bridge._queue("example.c.s.raw_messages")
 
     async def broken(record):
         raise OSError(errno.ENOSPC, "No space left on device")
@@ -366,7 +366,7 @@ async def test_a_row_the_queue_fails_to_take_is_dropped_and_done_in_the_log(tmp_
         bridge._on_record(first)
         bridge._on_record(second)                          # the memory queue is full: the slow path
         await wait_for(lambda: bridge.metrics["records_dropped"] == 1)
-        assert bridge.wals["example.c.s.sparkplug_raw"].status().pending == 1
+        assert bridge.wals["example.c.s.raw_messages"].status().pending == 1
     finally:
         await crash(bridge)
 
@@ -381,7 +381,7 @@ async def test_rows_the_queue_rejects_are_done_in_the_log(tmp_path, fake_streams
     sent = rows("A", 5)
     for r in sent:
         bridge._on_record(r)
-    log = bridge.wals["example.c.s.sparkplug_raw"]
+    log = bridge.wals["example.c.s.raw_messages"]
     await wait_for(lambda: bridge.metrics["records_dropped"] == 3)   # 1-2 queued, 3-5 refused
     assert log.status().pending == 2 and log.status().checkpoint == 0
     await wait_for(lambda: log.status().checkpoint == 5, timeout=15)  # 1-2 written: past the refused ones
@@ -393,11 +393,11 @@ async def test_rows_the_queue_rejects_are_done_in_the_log(tmp_path, fake_streams
 async def test_only_the_enabled_sources_tables_are_opened_each_with_a_log(tmp_path, fake_streams):
     cfg = bridge_config(tmp_path)
     cfg["sources"] = [{"name": "sp", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": True,
-                       "target_table": "c.s.sparkplug_raw_2"},
+                       "target_table": "c.s.raw_messages_2"},
                       {"name": "off", "protocol": "sparkplug", "endpoint": "mqtt://127.0.0.1:1", "enabled": False}]
     bridge = core_bridge.Bridge(cfg)
     await bridge.start_infra()
     try:
-        assert list(bridge.tables) == list(bridge.writers) == list(bridge.wals) == ["example.c.s.sparkplug_raw_2"]
+        assert list(bridge.tables) == list(bridge.writers) == list(bridge.wals) == ["example.c.s.raw_messages_2"]
     finally:
         await bridge.stop()

@@ -1,4 +1,4 @@
-"""raw_row: topic parsing, the skip rules and the sparkplug_raw row."""
+"""raw_row: topic parsing, the skip rules and the raw_messages row."""
 from __future__ import annotations
 
 import json
@@ -127,7 +127,7 @@ def test_skip_reasons():
     assert convert("spBv1.0/Plant1/NDATA/Line A", b"", AT).skip is None        # an empty payload decodes
 
 
-def test_zerobus_record_has_the_sparkplug_raw_columns():
+def test_zerobus_record_has_the_raw_messages_columns():
     row = RawRow("id-1", "spBv1.0/G/NDATA/E", "spBv1.0", "G", "NDATA", "E", None, '{"seq":1}', AT)
     record = row.to_zerobus_record()
     assert tuple(record) == COLUMNS == ("msg_id", "msg_topic", "namespace", "group_id", "message_type",

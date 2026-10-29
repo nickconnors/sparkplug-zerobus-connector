@@ -6,7 +6,7 @@ Skipped unless set:
     SPARKPLUG_LIVE_ENV      env file with ZEROBUS_ENDPOINT, DATABRICKS_HOST, DATABRICKS_CLIENT_ID,
                             DATABRICKS_CLIENT_SECRET (the service principal) and DATABRICKS_WAREHOUSE_ID
     SPARKPLUG_LIVE_PROFILE  Databricks CLI profile for reading the table back
-    SPARKPLUG_LIVE_TABLE    catalog.schema.table with the sparkplug_raw DDL (the service principal: MODIFY, SELECT)
+    SPARKPLUG_LIVE_TABLE    catalog.schema.table with the raw_messages DDL (the service principal: MODIFY, SELECT)
 """
 from __future__ import annotations
 

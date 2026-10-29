@@ -296,7 +296,7 @@ async def test_the_bridge_goes_offline_while_writes_fail_and_online_again_after_
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c", "schema": "s",
-                                       "table": "sparkplug_raw"}},
+                                       "table": "raw_messages"}},
         "backpressure": {},
     })
     topic, payload, _ = transmission_messages()[0]
@@ -411,7 +411,7 @@ def _bridge_with(mosquitto, monkeypatch, **source):
         "zerobus": {"enabled": True, "zerobus_endpoint": "https://example.zerobus",
                     "auth": {"client_id": "id", "client_secret": "secret"},
                     "default_target": {"workspace_host": "https://example.cloud.databricks.com", "catalog": "c", "schema": "s",
-                                       "table": "sparkplug_raw"}},
+                                       "table": "raw_messages"}},
         "backpressure": {},
     })
 
