@@ -100,6 +100,9 @@ async def test_settings_are_saved_to_the_file_for_the_next_start(page):
 @pytest.mark.parametrize("values, field", [
     ({"backpressure.memory_queue.max_size": "many"}, "backpressure.memory_queue.max_size"),
     ({"backpressure.memory_queue.max_size": "0"}, "backpressure.memory_queue.max_size"),
+    ({"backpressure.memory_queue.max_size": "inf"}, "backpressure.memory_queue.max_size"),      # was HTTP 500
+    ({"zerobus.batch.linger_seconds": "nan"}, "zerobus.batch.linger_seconds"),                 # was saved as .nan
+    ({"zerobus.drain_timeout_seconds": "-inf"}, "zerobus.drain_timeout_seconds"),
     ({"backpressure.memory_queue.drop_policy": "random"}, "backpressure.memory_queue.drop_policy"),
     ({"diagnostics.enabled": "maybe"}, "diagnostics.enabled"),
     ({"zerobus.auth.client_secret": "x"}, "zerobus.auth.client_secret"),        # not a setting of this page
@@ -118,6 +121,25 @@ def _upload(name: str, content: bytes) -> aiohttp.FormData:
     form = aiohttp.FormData()
     form.add_field("file", content, filename=name, content_type="application/octet-stream")
     return form
+
+
+async def test_a_big_upload_is_refused_without_reading_it_whole(page, monkeypatch):
+    """The 1 MB limit is checked while reading: a multi-GB upload must not be buffered in memory first."""
+    http, _, _ = page
+    read = {"bytes": 0}
+    chunk = aiohttp.BodyPartReader.read_chunk
+
+    async def counted(self, size=aiohttp.BodyPartReader.chunk_size):
+        data = await chunk(self, size)
+        read["bytes"] += len(data)
+        return data
+    monkeypatch.setattr(aiohttp.BodyPartReader, "read_chunk", counted)
+    # (the server answers before the body ends and discards the rest: aiohttp's lingering close, up to 10 s
+    # unless the client closes the connection)
+    async with http.post("/api/certs", data=_upload("huge.pem", b"x" * (5 * 1024 * 1024)),
+                         headers={"Connection": "close"}) as r:
+        assert r.status == 413
+    assert read["bytes"] <= 1024 * 1024 + 2 * aiohttp.BodyPartReader.chunk_size
 
 
 async def test_certificates_upload_replace_list_delete(page, tmp_path):

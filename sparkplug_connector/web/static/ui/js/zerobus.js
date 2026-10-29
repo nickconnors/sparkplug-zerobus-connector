@@ -49,7 +49,7 @@ document.addEventListener('alpine:init', () => {
     get secretNote() {
       if (this.secretSet) return 'Set in the connector\'s environment.';
       if (this.auth.client_secret_env) return 'Not set: set it in the connector\'s environment, then restart the connector.';
-      if (this.auth.client_secret_other) return 'The file has a secret of its own; saving here switches it to ' + SECRET_VARIABLE + '.';
+      if (this.auth.client_secret_other) return 'The file has a secret of its own: it stays as written.';
       return 'Set ' + SECRET_VARIABLE + ' in the connector\'s environment; saving here makes the file read it.';
     },
     invalid(field) { return this.errors[field] ? 'true' : null; },
@@ -77,7 +77,8 @@ document.addEventListener('alpine:init', () => {
         default_target: { workspace_host: f.workspace_host.trim(), catalog, schema, table },
         auth: { client_id: f.client_id.trim() },
       };
-      if (!this.auth.client_secret_env) body.auth.client_secret = '${env:' + SECRET_VARIABLE + '}';   // the file names no variable yet
+      // only where the file has no secret at all: a ${credential:...} or ${env:NAME:default} stays as written
+      if (!this.auth.client_secret_env && !this.auth.client_secret_other) body.auth.client_secret = '${env:' + SECRET_VARIABLE + '}';
       this.saving = true;
       try {
         const r = await window.api.post('/api/zerobus/config', body);

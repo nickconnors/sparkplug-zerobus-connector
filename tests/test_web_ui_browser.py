@@ -237,3 +237,27 @@ async def test_the_bridge_is_stopped_started_and_restarted_from_the_pages(tab):
     await playwright_api.expect(banner).to_be_hidden()
     await playwright_api.expect(pill).to_have_text("Running · Zerobus off")
     assert t.errors == []
+
+
+@pytest.mark.parametrize("secret, note", [
+    ("${credential:zerobus.client_secret}", "The file has a secret of its own: it stays as written."),
+    ("${env:ZB_SECRET:}", "Not set: set it in the connector's environment, then restart the connector."),
+])
+async def test_a_zerobus_save_keeps_a_secret_the_page_did_not_set(tab, monkeypatch, secret, note):
+    """The page only ever writes ${env:DATABRICKS_CLIENT_SECRET} where the file has no secret: a ${credential:...}
+    placeholder or an ${env:NAME:default} stays as written when another field is saved."""
+    t, path, _ = tab
+    monkeypatch.delenv("ZB_SECRET", raising=False)
+    raw = yaml.safe_load(path.read_text())
+    raw["zerobus"] = {"enabled": False, "auth": {"client_id": "id", "client_secret": secret}}
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    await t.goto("/zerobus.html")
+    await playwright_api.expect(t.locator(".secret-env + small")).to_have_text(note)
+    await t.fill("#z-host", "https://example.cloud.databricks.com")
+    await t.fill("#z-endpoint", "123.zerobus.us-east-1.cloud.databricks.com")
+    await t.fill("#z-table", "c.s.sparkplug_raw")
+    await t.click("button[type=submit] >> text=Save")
+    await t.wait_for_selector(".toast")
+    saved = yaml.safe_load(path.read_text())["zerobus"]
+    assert saved["auth"]["client_secret"] == secret and saved["workspace_host"] == "https://example.cloud.databricks.com"
+    assert t.errors == []

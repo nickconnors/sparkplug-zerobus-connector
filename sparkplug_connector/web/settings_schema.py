@@ -5,6 +5,7 @@ and Zerobus have their own pages (and APIs).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -96,6 +97,8 @@ def _parse(s: Setting, value: Any) -> Any:
             number = float(value)
         except (TypeError, ValueError):
             raise ValueError("a number") from None
+        if not math.isfinite(number):            # float() takes "inf" and "nan"
+            raise ValueError("a number")
         if s.type == "INTEGER":
             if number != int(number):
                 raise ValueError("a whole number")

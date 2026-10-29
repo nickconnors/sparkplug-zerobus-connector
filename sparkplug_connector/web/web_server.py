@@ -46,7 +46,8 @@ logger = logging.getLogger(__name__)
 
 
 SECRET_KEY_PARTS = ('password', 'secret', 'token', 'private_key', 'api_key')
-ENV_REF = re.compile(r'^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$')
+ENV_REF = re.compile(r'^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$')                 # what the page may set
+ENV_REF_IN_FILE = re.compile(r'^\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}$')   # also ${env:NAME:default}
 
 
 def env_secret(value: Any, label: str) -> Optional[str]:
@@ -65,9 +66,9 @@ def env_reference(value: Any) -> Dict[str, Any]:
     that the file holds something else (a value, or a ${credential:...} placeholder)."""
     if value in (None, ''):
         return {'env': None, 'set': False, 'other': False}
-    m = ENV_REF.match(str(value).strip())
-    if m:
-        return {'env': m.group(1), 'set': bool(os.environ.get(m.group(1))), 'other': False}
+    m = ENV_REF_IN_FILE.match(str(value).strip())
+    if m:     # with a default, the loader uses it when the variable isn't set
+        return {'env': m.group(1), 'set': bool(os.environ.get(m.group(1)) or m.group(2)), 'other': False}
     return {'env': None, 'set': True, 'other': True}
 
 UI_DIR = Path(__file__).parent / "static" / "ui"
@@ -939,7 +940,14 @@ class WebServer:
         async for part in reader:
             if part.name != 'file':
                 continue
-            content = await part.read(decode=False)
+            # in chunks, refused past the limit: part.read() would hold a multi-GB upload in memory first
+            content = bytearray()
+            while chunk := await part.read_chunk():
+                content.extend(chunk)
+                if len(content) > MAX_SIZE:
+                    refused = web.json_response({'status': 'error', 'message': 'Files are limited to 1 MB.'}, status=413)
+                    refused.force_close()       # the rest of the body stays unread: no keep-alive on this connection
+                    return refused
             try:
                 saved = self._cert_store().save(part.filename or '', bytes(content), overwrite)
             except CertError as e:

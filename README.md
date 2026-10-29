@@ -187,7 +187,8 @@ py -3.12 -m venv .venv
 A save goes to the file the connector was started with (`--config`): fields the page doesn't show stay as written
 there, `${env:...}` placeholders included; the API never returns passwords or secrets. Secrets come from environment
 variables only: a source's MQTT password field takes a variable's **name** (saved as `${env:NAME}`), and the Zerobus
-client secret is `DATABRICKS_CLIENT_SECRET` (`${env:DATABRICKS_CLIENT_SECRET}` in the file); the page shows whether
+client secret is `DATABRICKS_CLIENT_SECRET` (`${env:DATABRICKS_CLIENT_SECRET}` in the file, written only where the file
+has no secret: a `${credential:...}` or `${env:NAME:default}` already there stays); the page shows whether
 each is set in the connector's environment, and a secret's value is refused.
 
 The pages are plain HTML with [Alpine.js](https://alpinejs.dev) (CSP build) and [Pico CSS](https://picocss.com),
