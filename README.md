@@ -42,6 +42,9 @@ host (another bridge, an Ignition gateway with MQTT Engine), either the connecto
 it runs as a plain subscriber next to it. Run exactly one connector per Primary Host ID: two with the same
 id fight over STATE, and two with different ids write every row twice.
 
+As a plain subscriber next to another primary host, the connector gets data only while that host is
+ONLINE: MQTT Transmission publishes only then (and buffers for its primary host alone).
+
 ## Quick start
 
 ### 1. Databricks
@@ -89,7 +92,7 @@ password). Optionally any other value can come from the environment too: `'${env
 
 The MQTT user needs to subscribe to `spBv1.0/#`, to publish rebirth requests on `spBv1.0/+/NCMD/+` (unless
 `block_auto_rebirth: true`; some MQTT servers, Chariot among them, close the connection on a refused publish)
-and, as a primary host, to publish its own STATE topic (`spBv1.0/STATE/<primary_host_id>`). For **MQTT over TLS** use `mqtts://<host>:8883`; a private CA, client
+and, as a primary host, to publish its own STATE topic (`spBv1.0/STATE/<primary_host_id>`). For **MQTT over TLS** use `mqtts://<host>:8883` (an `mqtts://` endpoint on a plain port, e.g. 1883, fails with `UNEXPECTED_EOF_WHILE_READING`); a private CA, client
 certificates and the other TLS settings go under the source's `security:` (commented in the example).
 
 ### 3. Run it in Docker
@@ -130,11 +133,16 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
   the container is made again (`docker rm`, then `docker run`, e.g. for an update). To make it again unattended,
   put them in a file instead: copy [.env.example](.env.example) to `connector.env`, fill it in, keep it out of git,
   and use `--env-file connector.env` in place of the two `-e`.
+  Check a secret before `docker run`, without showing it: its length, `echo ${#SPARKPLUG_MQTT_PASSWORD}` (bash,
+  zsh) or `$env:SPARKPLUG_MQTT_PASSWORD.Length` (PowerShell).
+- Stop, start, update: `docker stop sparkplug-zerobus` and `docker start sparkplug-zerobus` keep the container
+  (and its secrets); `docker run` again needs `docker rm sparkplug-zerobus` first. An update: `git pull`,
+  `docker build` as above, `docker rm -f sparkplug-zerobus`, then `docker run` with the secrets set in that shell.
 - The edited file is mounted over the image's copy of it; edits made on the web page are saved into it, so
   don't mount it read-only. The container runs as uid 1000: on Linux, make the file writable by it
   (`sudo chown 1000 sparkplug_connector/config/config.yaml`), or the page's saves fail.
-- It's a file the repository tracks: before pulling an update, commit or stash your edits (`git stash`, then
-  `git stash pop` after the pull).
+- It's a file the repository tracks: before pulling an update, copy your edited file aside, `git checkout --` it,
+  pull, and copy it back (`git stash` and `git stash pop` conflict when the update changed the example file).
 - Use `--mount`, not `-v`, for the file: if the file doesn't exist, `-v` creates an empty directory in its
   place (on Windows as well), and the connector fails with `IsADirectoryError`; `--mount` stops with an error.
 - The `connector-wal` volume keeps the write-ahead log (`zerobus.wal`, on in the example, path `wal` =
