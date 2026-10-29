@@ -37,6 +37,7 @@ document.addEventListener('alpine:init', () => {
     errors: {},
     formError: '',
     saving: false,
+    version: null,                  // the configuration's version this form loaded (sent back with a save)
     original: null,
     toDelete: null,
 
@@ -46,7 +47,9 @@ document.addEventListener('alpine:init', () => {
 
     async load() {
       try {
-        const [sources, certs] = await Promise.all([window.api.get('/api/sources'), window.api.get('/api/certs')]);
+        const [loaded, certs] = await Promise.all([window.api.getVersioned('/api/sources'), window.api.get('/api/certs')]);
+        const sources = loaded.data;
+        this.version = loaded.version;
         this.sources = (sources.sources || []).filter((s) => (s.protocol || 'sparkplug') === 'sparkplug');
         this.certs = certs.files.map((f) => f.name);
         if (this.page * PAGE_SIZE >= this.sources.length && this.page > 0) this.page = 0;
@@ -240,9 +243,9 @@ document.addEventListener('alpine:init', () => {
       this.saving = true;
       try {
         if (this.editing) {
-          await window.api.put('/api/sources/' + encodeURIComponent(this.editing), this.body());
+          await window.api.put('/api/sources/' + encodeURIComponent(this.editing), this.body(), window.api.ifMatch(this.version));
         } else {
-          await window.api.post('/api/sources', this.body());
+          await window.api.post('/api/sources', this.body(), window.api.ifMatch(this.version));
         }
         this.close();
         window.toast((this.editing ? 'Saved ' : 'Added ') + this.form.name, 'ok');
@@ -270,7 +273,7 @@ document.addEventListener('alpine:init', () => {
       this.$refs.remove.close();
       this.toDelete = null;
       try {
-        await window.api.del('/api/sources/' + encodeURIComponent(source.name));
+        await window.api.del('/api/sources/' + encodeURIComponent(source.name), window.api.ifMatch(this.version));
         window.toast('Deleted ' + source.name, 'ok');
         await this.load();
         await Alpine.store('connector').refresh();

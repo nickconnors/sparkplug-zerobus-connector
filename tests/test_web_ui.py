@@ -365,3 +365,44 @@ async def test_the_page_is_writable_by_default(page):
     http, _, _ = page
     async with http.get("/api/auth/status") as r:
         assert (await r.json())["read_only"] is False
+
+
+# ----------------------------------------------------------------------------- save conflicts
+
+async def test_a_settings_save_on_an_old_version_is_refused_and_changes_nothing(page):
+    """Two people on the page: the second save, made on what the first one's save replaced, must not overwrite it."""
+    http, path, _ = page
+    async with http.get("/api/settings") as r:
+        old = r.headers["X-Config-Version"]
+    async with http.put("/api/settings", json={"values": {"diagnostics.group_id": "FIRST"}},
+                        headers={"If-Match": old}) as r:
+        assert r.status == 200
+        new = r.headers["X-Config-Version"]
+    assert new != old
+    before = path.read_text()
+    async with http.put("/api/settings", json={"values": {"diagnostics.group_id": "SECOND"}},
+                        headers={"If-Match": old}) as r:
+        body = await r.json()
+        assert r.status == 412 and "changed since" in body["message"]
+    assert path.read_text() == before
+    async with http.put("/api/settings", json={"values": {"diagnostics.group_id": "SCRIPT"}}) as r:
+        assert r.status == 200                                                  # no If-Match: as before
+
+
+async def test_source_and_zerobus_saves_on_an_old_version_are_refused_before_anything_changes(page):
+    from test_web_sources import EDIT
+    http, path, bridge = page
+    async with http.get("/api/sources") as r:
+        old = r.headers["X-Config-Version"]
+    async with http.put("/api/settings", json={"values": {"diagnostics.group_id": "OTHER"}}) as r:
+        assert r.status == 200                                                  # someone else's save
+    before, running = path.read_text(), sorted(bridge.clients)
+    sp = next(s for s in bridge.sources if s["name"] == "sp")
+    stale = {"If-Match": old}
+    for method, url, body in (("PUT", "/api/sources/sp", EDIT), ("DELETE", "/api/sources/sp", None),
+                              ("POST", "/api/sources", {**EDIT, "name": "new"}),
+                              ("POST", "/api/zerobus/config", {"workspace_host": "https://x.cloud.databricks.com"})):
+        async with http.request(method, url, json=body, headers=stale) as r:
+            assert r.status == 412, (method, url, r.status, await r.text())
+    assert path.read_text() == before and sorted(bridge.clients) == running
+    assert next(s for s in bridge.sources if s["name"] == "sp") == sp

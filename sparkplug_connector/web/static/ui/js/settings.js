@@ -8,6 +8,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('settingsPage', () => ({
     loading: true,
     saving: false,
+    version: null,                  // the configuration's version this form loaded (sent back with a save)
     sections: [],
     fields: {},
     values: {},
@@ -26,7 +27,9 @@ document.addEventListener('alpine:init', () => {
         }
       });
       try {
-        const settings = await window.api.get('/api/settings');
+        const loaded = await window.api.getVersioned('/api/settings');
+        const settings = loaded.data;
+        this.version = loaded.version;
         this.sections = settings.sections;
         const fields = {};
         settings.sections.forEach((s) => s.fields.forEach((f) => { fields[f.key] = f; }));
@@ -176,7 +179,9 @@ document.addEventListener('alpine:init', () => {
       this.changedKeys.forEach((k) => { values[k] = this.values[k]; });
       this.saving = true;
       try {
-        const settings = await window.api.put('/api/settings', { values });
+        const saved = await window.api.raw('PUT', '/api/settings', { values }, window.api.ifMatch(this.version));
+        const settings = saved.data;
+        this.version = saved.headers.get('X-Config-Version');   // the version this save made
         this.apply(settings);
         this.$refs.review.close();
         if (restart === true) {

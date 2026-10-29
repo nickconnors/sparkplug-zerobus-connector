@@ -11,6 +11,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('zerobusPage', () => ({
     loading: true,
     saving: false,
+    version: null,                  // the configuration's version this form loaded (sent back with a save)
     busy: null,
     checking: null,
     form: { enabled: true, workspace_host: '', zerobus_endpoint: '', table: '', client_id: '' },
@@ -25,7 +26,9 @@ document.addEventListener('alpine:init', () => {
 
     async load() {
       try {
-        const cfg = await window.api.get('/api/zerobus/config');
+        const loaded = await window.api.getVersioned('/api/zerobus/config');
+        const cfg = loaded.data;
+        this.version = loaded.version;
         const t = cfg.default_target || {};
         this.form = {
           enabled: cfg.enabled === undefined ? true : !!cfg.enabled,
@@ -81,7 +84,7 @@ document.addEventListener('alpine:init', () => {
       if (!this.auth.client_secret_env && !this.auth.client_secret_other) body.auth.client_secret = '${env:' + SECRET_VARIABLE + '}';
       this.saving = true;
       try {
-        const r = await window.api.post('/api/zerobus/config', body);
+        const r = await window.api.post('/api/zerobus/config', body, window.api.ifMatch(this.version));
         window.toast(r.warning || 'Saved. Stop and start Zerobus to use the new settings.', r.warning ? 'error' : 'ok');
         await this.load();
       } catch (e) {

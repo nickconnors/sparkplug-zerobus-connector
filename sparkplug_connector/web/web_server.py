@@ -13,6 +13,7 @@ Secrets (a source's MQTT password, the Zerobus client secret) come from environm
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -241,6 +242,15 @@ class WebServer:
         self.app.middlewares.append(same_origin_middleware(
             allowed_origins((self.config.get('web_ui') or {}).get('allowed_origins'))))
         self.app.middlewares.append(read_only_middleware(self.read_only))
+
+        @web.middleware
+        async def config_version_middleware(request: web.Request, handler):
+            """Every API answer carries the configuration's version (the forms keep the one they loaded with)."""
+            response = await handler(request)
+            if request.path.startswith('/api/'):
+                response.headers['X-Config-Version'] = self.config_version()
+            return response
+        self.app.middlewares.append(config_version_middleware)
         if self.read_only:
             logger.info("✓ Web UI read-only (web_ui.read_only): changes through it are refused")
 
@@ -389,6 +399,9 @@ class WebServer:
     @require_permission(Permission.WRITE)
     async def add_source(self, request: web.Request) -> web.Response:
         """Add new data source."""
+        stale = self._stale(request)          # before anything changes
+        if stale is not None:
+            return stale
         try:
             data = await request.json()
 
@@ -435,6 +448,9 @@ class WebServer:
     @require_permission(Permission.DELETE)
     async def remove_source(self, request: web.Request) -> web.Response:
         """Remove data source."""
+        stale = self._stale(request)          # before anything changes
+        if stale is not None:
+            return stale
         try:
             source_name = request.match_info['name']
 
@@ -453,6 +469,9 @@ class WebServer:
     @require_permission(Permission.WRITE)
     async def update_source(self, request: web.Request) -> web.Response:
         """Update data source configuration."""
+        stale = self._stale(request)          # before anything changes
+        if stale is not None:
+            return stale
         try:
             source_name = request.match_info['name']
 
@@ -740,6 +759,9 @@ class WebServer:
     @require_permission(Permission.CONFIGURE)
     async def update_zerobus_config(self, request: web.Request) -> web.Response:
         """Update ZeroBus configuration."""
+        stale = self._stale(request)          # before anything changes
+        if stale is not None:
+            return stale
         try:
             data = await request.json()
             if not isinstance(data, dict):
@@ -958,6 +980,24 @@ class WebServer:
         from sparkplug_connector.core.config_loader import ConfigLoader
         return ConfigLoader(config_path=self.config_path)
 
+    def config_version(self) -> str:
+        """The configuration file's version (a hash of its bytes): the page sends it back with a save (If-Match), so
+        a save made on what another save has replaced meanwhile is refused instead of overwriting it."""
+        try:
+            data = self._config_loader().config_path.read_bytes()
+        except OSError:
+            data = b''
+        return hashlib.sha256(data).hexdigest()[:16]
+
+    def _stale(self, request: web.Request) -> Optional[web.Response]:
+        """412 when the save's If-Match isn't the file's version any more (no If-Match, e.g. curl: no check)."""
+        expected = request.headers.get('If-Match')
+        if expected is None or expected.strip().strip('"') == self.config_version():
+            return None
+        return web.json_response({'status': 'error', 'conflict': True,
+                                  'message': 'The configuration changed since this page loaded it (another user, or '
+                                             'the file was edited): reload the page, then save again.'}, status=412)
+
     def _settings_response(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         loader = self._config_loader()
         return {**settings_schema.schema(), 'values': settings_schema.values(raw), 'file': str(loader.config_path),
@@ -971,6 +1011,9 @@ class WebServer:
     @require_permission(Permission.CONFIGURE)
     async def update_settings(self, request: web.Request) -> web.Response:
         """``{"values": {key: value}}``: saved to the file (blank: back to the default); applied at the next start."""
+        stale = self._stale(request)          # before anything changes
+        if stale is not None:
+            return stale
         try:
             data = await request.json()
         except Exception:  # noqa: BLE001 - not JSON

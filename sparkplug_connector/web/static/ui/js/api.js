@@ -80,6 +80,10 @@
     put: (path, body, opts) => request('PUT', path, body, opts).then((r) => r.data),
     del: (path, opts) => request('DELETE', path, undefined, opts).then((r) => r.data),
     raw: request,
+    // a form's load: the data and the configuration's version, which its save sends back (a save on a version
+    // another save has replaced is refused: 412, "reload the page")
+    getVersioned: (path) => request('GET', path).then((r) => ({ data: r.data, version: r.headers.get('X-Config-Version') })),
+    ifMatch: (version) => (version ? { headers: { 'If-Match': version } } : {}),
   };
 
   // Small shared helpers.

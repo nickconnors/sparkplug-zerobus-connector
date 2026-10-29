@@ -339,3 +339,20 @@ async def test_a_read_only_page_disables_its_controls(browser, tmp_path, monkeyp
         await playwright_api.expect(t.get_by_role("button", name="Add source")).to_be_disabled()
         await context.close()
         assert errors == []
+
+
+async def test_a_settings_save_after_someone_else_s_says_reload(tab):
+    t, path, _ = tab
+    other = await t.context.new_page()
+    for p in (t, other):
+        await p.goto("/settings.html")
+        await p.get_by_role("button", name="Expand all").click()
+    for p, value in ((other, "7"), (t, "8")):
+        await p.locator('[id="zerobus.drain_timeout_seconds"]').fill(value)
+        await p.get_by_role("button", name="Review and save…").click()
+        await p.locator("dialog[open]").get_by_role("button", name="Save", exact=True).click()
+        if p is other:
+            await playwright_api.expect(p.locator(".toast", has_text="Saved")).to_be_visible()
+    await playwright_api.expect(t.locator(".form-error")).to_contain_text("changed since")
+    assert yaml.safe_load(path.read_text())["zerobus"]["drain_timeout_seconds"] == 7             # the first save kept
+    assert [e for e in t.errors if "status of 412" not in e] == []      # (Chrome logs the expected 412 itself)
