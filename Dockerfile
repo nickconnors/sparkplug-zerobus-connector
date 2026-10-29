@@ -21,7 +21,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt
 COPY sparkplug_connector ./sparkplug_connector
-RUN mkdir -p /app/wal && useradd --create-home connector && chown -R connector /app
+# /app/wal and the uploaded certificates' directory exist in the image, so a volume mounted there is the connector's
+RUN mkdir -p /app/wal && useradd --create-home connector && chown -R connector /app \
+    && install -d -o connector -m 700 /home/connector/.sparkplug_connector /home/connector/.sparkplug_connector/certs
 USER connector
 EXPOSE 8001
 # Health: GET /health on the web UI's port (web_ui.port in the config; CONNECTOR_HEALTH_PORT if it isn't 8001)

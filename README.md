@@ -101,6 +101,7 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
   -p 127.0.0.1:8001:8001 \
   --mount type=bind,source="$PWD/sparkplug_connector/config/config.yaml",target=/app/sparkplug_connector/config/config.yaml \
   --mount type=volume,source=connector-wal,target=/app/wal \
+  --mount type=volume,source=connector-certs,target=/home/connector/.sparkplug_connector/certs \
   sparkplug-zerobus
 ```
 
@@ -115,6 +116,7 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
   -p 127.0.0.1:8001:8001 `
   --mount "type=bind,source=$PWD\sparkplug_connector\config\config.yaml,target=/app/sparkplug_connector/config/config.yaml" `
   --mount "type=volume,source=connector-wal,target=/app/wal" `
+  --mount "type=volume,source=connector-certs,target=/home/connector/.sparkplug_connector/certs" `
   sparkplug-zerobus
 ```
 
@@ -131,7 +133,8 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
 - Use `--mount`, not `-v`, for the file: if the file doesn't exist, `-v` creates an empty directory in its
   place (on Windows as well), and the connector fails with `IsADirectoryError`; `--mount` stops with an error.
 - The `connector-wal` volume keeps the write-ahead log (`zerobus.wal`, on in the example, path `wal` =
-  `/app/wal`) across container restarts.
+  `/app/wal`) across container restarts; `connector-certs` keeps the certificates uploaded on the web page
+  (`web_ui.certs_dir`), which would otherwise be gone when the container is made again.
 - `--stop-timeout 30`: on `docker stop` the connector first publishes OFFLINE (a primary host's edges start
   buffering), then writes what is queued, which can take up to ~20 s (`drain_timeout_seconds`, 15). Docker's
   default is 10 s, then SIGKILL; with the write-ahead log the rows not written are sent after the next start,
@@ -371,4 +374,5 @@ numeric compression, the OT simulator and the unused security modules were remov
 
 The original repository has no license file, so none is added here. The Sparkplug B decoder files in
 `sparkplug_connector/sparkplug/` are derived from [Eclipse Tahu](https://github.com/eclipse-tahu/tahu) and stay
-under the Eclipse Public License 2.0: see [NOTICE.md](NOTICE.md).
+under the Eclipse Public License 2.0; the web page's vendored Alpine.js and Pico CSS are under the MIT License:
+see [NOTICE.md](NOTICE.md).

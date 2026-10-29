@@ -9,7 +9,7 @@ the files below are the packages' published distribution files, copied unchanged
 | `pico.min.css` | [`@picocss/pico`](https://www.npmjs.com/package/@picocss/pico) (`css/pico.min.css`) | 2.1.1 | 2025-03-15 | MIT | `fbc9a63fc9fc9f72d12fd7fc9806e11fa9f77ae4f9cad146b27003a1119ba3db` |
 
 The npm tarballs matched the registry's published SHA-1 (`e679eb03…4013` for `csp-3.17.4.tgz`,
-`f2c4573b…1f8e` for `pico-2.1.1.tgz`). Sizes: Alpine 72 KB (24 KB gzipped), Pico 83 KB (12 KB gzipped).
+`f2c4573b…9f8e` for `pico-2.1.1.tgz`). Sizes: Alpine 72 KB (24 KB gzipped), Pico 83 KB (12 KB gzipped).
 
 The Alpine **CSP build** evaluates `x-*` expressions with its own parser instead of `new Function`, so the console
 runs under `script-src 'self'` without `unsafe-eval`. Its expressions are limited (no arrow functions, template
