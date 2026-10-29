@@ -103,6 +103,10 @@ async def security_headers_middleware(
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
+    elif 'Cache-Control' not in response.headers:
+        # the pages' files: checked for a change on every load (ETag / Last-Modified), so after an upgrade no
+        # browser keeps an old stylesheet or script (without a header it caches them by heuristics)
+        response.headers['Cache-Control'] = 'no-cache'
 
     # Remove server header to avoid information disclosure
     if 'Server' in response.headers:

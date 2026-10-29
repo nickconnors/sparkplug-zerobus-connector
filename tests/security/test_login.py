@@ -173,3 +173,28 @@ async def test_a_form_logout_goes_to_the_login_page_not_to_a_new_sign_in(server)
         assert r.status == 302 and r.headers["Location"] == "/static/login.html"
     async with http.get("/api/auth/status") as r:
         assert r.status == 401
+
+
+async def test_the_role_is_logged_once_at_sign_in_not_on_every_request(server, caplog):
+    """Every request rebuilds the user from the session: that must not log (it said "viewer" each time, though the
+    session's role, here operator, was the one used)."""
+    http, _ = server
+    state = await login(http)
+    with caplog.at_level("INFO"):
+        async with http.get(f"/login/callback?code=good-code&state={state}", allow_redirects=False) as r:
+            assert r.status == 302
+        for _ in range(3):
+            async with http.get("/api/sources") as r:
+                assert r.status == 200
+    roles = [r.getMessage() for r in caplog.records if "someone@example.com" in r.getMessage() and "role" in r.getMessage()]
+    assert len(roles) == 1 and "operator" in roles[0] and "groups=['OT-Operators']" in roles[0], roles
+
+
+async def test_an_unauthenticated_request_is_one_short_line_in_the_log(server, caplog):
+    """A 401 is the normal answer before a login (the page polls): no ERROR with a traceback for it."""
+    http, _ = server
+    with caplog.at_level("INFO"):
+        async with http.get("/api/status") as r:
+            assert r.status == 401
+    assert [r for r in caplog.records if r.levelname in ("ERROR", "CRITICAL")] == []
+    assert not any(r.exc_info for r in caplog.records)

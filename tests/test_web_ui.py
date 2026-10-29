@@ -49,6 +49,17 @@ def test_every_page_script_and_component_exists():
         assert f"Alpine.data('{component}'" in (UI_DIR / "js" / scripts[2]).read_text(), name
 
 
+@pytest.mark.parametrize("path", ["/css/app.css", "/js/api.js", "/js/login.js", "/vendor/pico.min.css",
+                                  "/img/favicon.svg", "/", "/settings.html", "/static/login.html"])
+async def test_the_page_and_its_files_are_checked_for_changes_on_every_load(page, path):
+    """After an upgrade a browser must not keep using an old stylesheet or script (it did: no cache header, so it
+    cached by heuristics): no-cache, i.e. a quick revalidation (ETag / Last-Modified) each time."""
+    http, _, _ = page
+    async with http.get(path) as r:
+        assert r.status == 200
+        assert r.headers.get("Cache-Control") == "no-cache", (path, r.headers.get("Cache-Control"))
+
+
 # ----------------------------------------------------------------------------- same origin only
 
 @pytest.mark.parametrize("headers, status", [
