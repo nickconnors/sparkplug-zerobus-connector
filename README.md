@@ -73,7 +73,8 @@ configuration (or keep your own file anywhere and pass it with `--config`). It h
 
 - under `zerobus:`, set `zerobus_endpoint` (`<workspace-id>.zerobus.<region>.cloud.databricks.com`),
   `default_target` (`workspace_host: https://<workspace>.cloud.databricks.com` and your table) and
-  `auth.client_id` (the service principal's application id);
+  `auth.client_id` (the service principal's application id), and `enabled: true` (off in the example, so a
+  first start tries no table; or switch it on on the Zerobus page: *Start Zerobus with the connector*, then Start);
 - on the source, set `endpoint` (`mqtt://<mqtt server>:1883`), `username`, `enabled: true`, and
   `primary_host_id` if the connector is the edges' primary host.
 

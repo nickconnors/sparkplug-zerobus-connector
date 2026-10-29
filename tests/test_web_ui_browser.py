@@ -342,6 +342,48 @@ async def test_rows_written_counts_a_table_shared_by_sources_once(tab):
     assert t.errors == []
 
 
+def _row(t, name):
+    import re
+    return t.locator("tbody tr").filter(has=t.locator("strong", has_text=re.compile(f"^{name}$")))
+
+
+async def test_a_source_s_state_says_why_it_is_not_online(tab):
+    """A running source showed Online (a primary host's state follows Zerobus) while the MQTT server refused its
+    login. Now: Error with the reason; Waiting for Zerobus (a primary host held OFFLINE); Connecting...; Online;
+    Subscribed (a plain subscriber)."""
+    import json
+    t, _, _ = tab
+    await t.goto("/")                                   # Zerobus off, nothing connects (the fixture's clients)
+    expect = playwright_api.expect
+    await expect(_row(t, "sp").locator("td").nth(1)).to_have_text("Waiting for Zerobus")
+    await expect(_row(t, "m").locator("td").nth(1)).to_have_text("Connecting…")
+
+    async def health(route):
+        body = json.loads(await (await route.fetch()).text())
+        body["sp"].update(mqtt_connected=False, mqtt_last_error="MqttCodeError: [code:5] Connection Refused: not authorised.",
+                          mqtt_failing_since="2026-10-29T19:57:32.772Z", state="ONLINE")
+        body["m"].update(mqtt_connected=True)
+        await route.fulfill(json=body)
+    await t.route("**/api/sparkplug/health", health)
+    await t.reload()
+    await expect(_row(t, "sp").locator("td").nth(1)).to_have_text("Error")
+    await expect(_row(t, "sp").locator("td.last-error")).to_contain_text("not authorised")
+    await expect(_row(t, "m").locator("td").nth(1)).to_have_text("Subscribed")
+    await t.goto("/sources.html")
+    await expect(_row(t, "sp").locator("td").nth(5)).to_contain_text("Error")
+    await expect(_row(t, "sp").locator("td").nth(5)).to_contain_text("not authorised")
+
+    async def online(route):
+        body = json.loads(await (await route.fetch()).text())
+        body["sp"].update(mqtt_connected=True, mqtt_online=True, state="ONLINE")
+        await route.fulfill(json=body)
+    await t.unroute("**/api/sparkplug/health")
+    await t.route("**/api/sparkplug/health", online)
+    await t.goto("/")
+    await expect(_row(t, "sp").locator("td").nth(1)).to_have_text("Online")
+    assert t.errors == []
+
+
 async def test_a_read_only_page_disables_its_controls(browser, tmp_path, monkeypatch, started):
     from test_web_ui import page_with
     async with page_with(tmp_path, monkeypatch, read_only=True) as (_, port, _):

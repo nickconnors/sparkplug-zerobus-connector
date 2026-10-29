@@ -31,7 +31,7 @@ def example(monkeypatch, tmp_path) -> dict:
     monkeypatch.chdir(tmp_path)                    # log and write-ahead log paths
     monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
     config = ConfigLoader(config_path=EXAMPLE).load()
-    config["zerobus"].update(zerobus_endpoint="123.zerobus.region.cloud.databricks.com")
+    config["zerobus"].update(enabled=True, zerobus_endpoint="123.zerobus.region.cloud.databricks.com")
     config["zerobus"]["default_target"]["workspace_host"] = "https://example.cloud.databricks.com"
     config["zerobus"]["auth"]["client_id"] = "id"
     return config
@@ -46,6 +46,7 @@ def test_the_example_has_one_sparkplug_source_off_and_no_workspace_values_or_sec
     assert (source["endpoint"], source["username"], source["password"]) == ("", "", "${env:SPARKPLUG_MQTT_PASSWORD:}")
     zerobus = config["zerobus"]
     assert zerobus["zerobus_endpoint"] == zerobus["default_target"]["workspace_host"] == ""
+    assert zerobus["enabled"] is False          # the first start tries no table: switched on once it is set up
     assert "workspace_host" not in zerobus                  # the default target's is the one the bridge reads
     assert zerobus["auth"] == {"client_id": "", "client_secret": "${env:DATABRICKS_CLIENT_SECRET}"}
     assert config["web_ui"]["authentication"]["oauth"]["workspace_host"] == ""

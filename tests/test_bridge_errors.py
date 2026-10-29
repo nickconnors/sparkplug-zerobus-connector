@@ -46,3 +46,43 @@ async def test_a_zerobus_start_that_fails_says_so(tmp_path, fake_streams, monkey
     result = await bridge.start_zerobus()
     assert result == {"status": "error", "message": "Failed to start ZeroBus: bad table"}
     assert not bridge.zerobus_enabled
+
+
+async def test_a_refused_mqtt_login_is_the_source_s_error_until_it_connects(monkeypatch):
+    """In an end-to-end test a source with no password was refused by the MQTT server while the page showed it
+    Online (a primary host's state follows Zerobus). The bridge keeps the last connection error, since when the
+    connection fails, until a connect succeeds; the page shows it as the source's Error."""
+    import asyncio
+    from test_per_target_queues import wait_for
+    from test_web_sources import IdleClient
+
+    class RefusedTwice(IdleClient):
+        attempts = 0
+
+        async def connect(self):
+            RefusedTwice.attempts += 1
+            if RefusedTwice.attempts <= 2:
+                raise ConnectionRefusedError("[code:5] Connection Refused: not authorised.")
+            self.is_connected = True                     # connected: returns, as SparkplugClient.connect does
+
+        async def subscribe(self):
+            pass
+
+    monkeypatch.setattr(core_bridge, "create_protocol_client", lambda **kw: RefusedTwice(kw["config"]))
+    bridge = core_bridge.Bridge({"sources": [{"name": "chariot", "protocol": "sparkplug", "endpoint": "mqtt://h:1883",
+                                              "username": "pyconnector"}]})
+    bridge.reconnect_initial_delay_sec = bridge.reconnect_max_delay_sec = 0.2
+    await bridge.start()
+    try:
+        await wait_for(lambda: bridge.sparkplug_health()["chariot"].get("mqtt_last_error"), 5)
+        h = bridge.sparkplug_health()["chariot"]
+        assert "not authorised" in h["mqtt_last_error"] and h["mqtt_failing_since"] is not None
+        first_since = h["mqtt_failing_since"]
+        await wait_for(lambda: RefusedTwice.attempts >= 2, 5)
+        assert bridge.sparkplug_health()["chariot"]["mqtt_failing_since"] == first_since     # failing since the first
+        await wait_for(lambda: RefusedTwice.attempts >= 3 and bridge.clients["chariot"].is_connected, 5)
+        await asyncio.sleep(0.05)
+        h = bridge.sparkplug_health()["chariot"]
+        assert h["mqtt_last_error"] is None and h["mqtt_failing_since"] is None
+    finally:
+        await bridge.stop()
