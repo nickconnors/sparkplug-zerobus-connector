@@ -71,21 +71,16 @@ Edit [sparkplug_connector/config/config.yaml](sparkplug_connector/config/config.
 configuration (or keep your own file anywhere and pass it with `--config`). It has one example source,
 `sparkplug-example`, switched off. In it:
 
-- set `zerobus.default_target` to your table;
-- set `enabled: true` on the source, and `primary_host_id` if the connector is the edges' primary host;
-- keep secrets out of the file: it reads them from the environment (`${env:NAME}` or `${env:NAME:default}`).
+- under `zerobus:`, set `zerobus_endpoint` (`<workspace-id>.zerobus.<region>.cloud.databricks.com`),
+  `default_target` (`workspace_host: https://<workspace>.cloud.databricks.com` and your table) and
+  `auth.client_id` (the service principal's application id);
+- on the source, set `endpoint` (`mqtt://<mqtt server>:1883`), `username`, `enabled: true`, and
+  `primary_host_id` if the connector is the edges' primary host.
 
-The environment variables the example reads, for example in a `connector.env` file:
-
-```
-ZEROBUS_ENDPOINT=<workspace-id>.zerobus.<region>.cloud.databricks.com
-DATABRICKS_HOST=https://<workspace>.cloud.databricks.com
-DATABRICKS_CLIENT_ID=<service principal application id>
-DATABRICKS_CLIENT_SECRET=<its OAuth secret>
-SPARKPLUG_MQTT_ENDPOINT=mqtt://<mqtt server>:1883
-SPARKPLUG_MQTT_USERNAME=<mqtt user>
-SPARKPLUG_MQTT_PASSWORD=<its password>
-```
+The two secrets are not in the file: the connector reads them from its environment (step 3),
+`DATABRICKS_CLIENT_SECRET` (the service principal's OAuth secret) and `SPARKPLUG_MQTT_PASSWORD` (the MQTT user's
+password). Optionally any other value can come from the environment too: `'${env:NAME}'`, or
+`'${env:NAME:default}'`, in the file.
 
 The MQTT user needs to subscribe to `spBv1.0/#`, to publish rebirth requests on `spBv1.0/+/NCMD/+` (unless
 `block_auto_rebirth: true`; some MQTT servers, Chariot among them, close the connection on a refused publish)
@@ -94,11 +89,15 @@ certificates and the other TLS settings go under the source's `security:` (comme
 
 ### 3. Run it in Docker
 
-Linux / macOS (bash):
+The secrets are typed in (not shown) and passed from the shell (`-e NAME` without a value): nothing is written to
+disk. Linux / macOS (bash or zsh):
 
 ```
+printf "Zerobus client secret: "; read -rs DATABRICKS_CLIENT_SECRET; echo; export DATABRICKS_CLIENT_SECRET
+printf "MQTT password: "; read -rs SPARKPLUG_MQTT_PASSWORD; echo; export SPARKPLUG_MQTT_PASSWORD
 docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
-docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 --env-file connector.env \
+docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 \
+  -e DATABRICKS_CLIENT_SECRET -e SPARKPLUG_MQTT_PASSWORD \
   -p 127.0.0.1:8001:8001 \
   --mount type=bind,source="$PWD/sparkplug_connector/config/config.yaml",target=/app/sparkplug_connector/config/config.yaml \
   --mount type=volume,source=connector-wal,target=/app/wal \
@@ -108,14 +107,22 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
 Windows (PowerShell; a backtick ends each continued line, nothing after it):
 
 ```powershell
+$env:DATABRICKS_CLIENT_SECRET = [Net.NetworkCredential]::new('', (Read-Host "Zerobus client secret" -AsSecureString)).Password
+$env:SPARKPLUG_MQTT_PASSWORD = [Net.NetworkCredential]::new('', (Read-Host "MQTT password" -AsSecureString)).Password
 docker build -t sparkplug-zerobus --build-arg PIP_INDEX_URL=https://pypi.org/simple .
-docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 --env-file connector.env `
+docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 30 `
+  -e DATABRICKS_CLIENT_SECRET -e SPARKPLUG_MQTT_PASSWORD `
   -p 127.0.0.1:8001:8001 `
   --mount "type=bind,source=$PWD\sparkplug_connector\config\config.yaml,target=/app/sparkplug_connector/config/config.yaml" `
   --mount "type=volume,source=connector-wal,target=/app/wal" `
   sparkplug-zerobus
 ```
 
+- The secrets: Docker keeps them in the container's settings (anyone who may run `docker inspect` on the machine
+  can read them), so they survive restarts and reboots (`--restart unless-stopped`); type them again only when
+  the container is made again (`docker rm`, then `docker run`, e.g. for an update). To make it again unattended,
+  put them in a file instead: copy [.env.example](.env.example) to `connector.env`, fill it in, keep it out of git,
+  and use `--env-file connector.env` in place of the two `-e`.
 - The edited file is mounted over the image's copy of it; edits made on the web page are saved into it, so
   don't mount it read-only. The container runs as uid 1000: on Linux, make the file writable by it
   (`sudo chown 1000 sparkplug_connector/config/config.yaml`), or the page's saves fail.
@@ -133,7 +140,6 @@ docker run -d --name sparkplug-zerobus --restart unless-stopped --stop-timeout 3
   in Docker's logging options (e.g. `--log-opt max-size=50m --log-opt max-file=5`). Outside Docker the
   connector also writes rotated log files to `/tmp/sparkplug_connector_logs` (on Windows
   `\tmp\sparkplug_connector_logs` on the current drive).
-- The image is Python only: build the web UI first (below) to include it; without it `/` explains how.
 - The web UI is on port 8001 (`web_ui.port`). Publish it on 127.0.0.1, or switch the login on (below)
   before publishing it more widely.
 
@@ -145,7 +151,8 @@ server is down. It doesn't say whether rows reach Databricks: `GET /api/sparkplu
 
 ### Or run it from a checkout
 
-Linux / macOS:
+With the two secrets in the shell's environment as above (bash: the two `read` lines; PowerShell: the two
+`$env:` lines). Linux / macOS:
 
 ```
 python3.12 -m venv .venv
@@ -279,7 +286,7 @@ only (e.g. `-p 127.0.0.1:8001:8001` when the proxy runs on the same VM).
 ## Credentials
 
 - **Environment** (the way the web page sets them): `${env:NAME}` in the file, the value in the connector's
-  environment (Docker: `--env-file connector.env`). The page sets the variable's name, never a value.
+  environment (Docker: `-e NAME`, or `--env-file`). The page sets the variable's name, never a value.
 - **Encrypted store** (set up by hand only): `${credential:zerobus.client_secret}` in the file reads
   `~/.sparkplug_connector/credentials.enc` (Fernet, key from `CONNECTOR_MASTER_PASSWORD`;
   `python -m sparkplug_connector.core.credential_manager store ...`). `CONNECTOR_ZEROBUS_CLIENT_ID` /

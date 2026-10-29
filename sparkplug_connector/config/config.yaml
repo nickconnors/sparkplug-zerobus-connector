@@ -1,12 +1,12 @@
 # The connector's configuration (the default one: edit it in place), then:
-#   1. Set the environment variables it reads: ZEROBUS_ENDPOINT (<workspace-id>.zerobus.<region>.cloud.databricks.com),
-#      DATABRICKS_HOST (https://<workspace>.cloud.databricks.com), DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET
-#      (a service principal with USE CATALOG, USE SCHEMA, MODIFY and SELECT on the target table), and the MQTT
-#      server's: SPARKPLUG_MQTT_ENDPOINT, SPARKPLUG_MQTT_USERNAME, SPARKPLUG_MQTT_PASSWORD. Never write a secret
-#      into this file.
-#   2. Set zerobus.default_target to your sparkplug_raw table.
-#   3. Under sources:, set enabled: true on the example source (it is off), and primary_host_id if the connector
-#      is the edges' primary host; add more sources the same way (a source's target_table: a table of its own).
+#   1. Under zerobus:, set zerobus_endpoint, default_target (your workspace and sparkplug_raw table) and
+#      auth.client_id (a service principal with USE CATALOG, USE SCHEMA, MODIFY and SELECT on the table).
+#   2. Under sources:, set the example source's endpoint and username, enabled: true (it is off), and
+#      primary_host_id if the connector is the edges' primary host; add more sources the same way (a source's
+#      target_table: a table of its own).
+#   3. The secrets come from the environment, never from this file: DATABRICKS_CLIENT_SECRET (the service
+#      principal's OAuth secret) and SPARKPLUG_MQTT_PASSWORD (the MQTT user's password).
+#   Any value may come from the environment instead: '${env:<name>}', or '${env:<name>:<default>}'.
 # Run: python -m sparkplug_connector (this file; --config <file> for another). The web page's source and ZeroBus
 # edits are saved back into the file it was started with, placeholders kept.
 bridge:
@@ -27,7 +27,7 @@ web_ui:
       provider: databricks         # the only provider (MFA: the workspace's identity provider)
       client_id: ''
       client_secret: ''
-      workspace_host: '${env:DATABRICKS_HOST:}'
+      workspace_host: ''           # https://<workspace>.cloud.databricks.com
       redirect_uri: http://localhost:8001/login/callback
       scopes:
       - all-apis
@@ -89,10 +89,10 @@ sources:
 - name: sparkplug-example
   protocol: sparkplug
   enabled: false
-  endpoint: '${env:SPARKPLUG_MQTT_ENDPOINT:mqtt://localhost:1883}'   # mqtts://host:8883 for TLS
+  endpoint: ''                     # the MQTT server: mqtt://<host>:1883, or mqtts://<host>:8883 for TLS
   # target_table: catalog.schema.table   # a table of its own; without it the default_target below
   client_id: databricks-sparkplug
-  username: '${env:SPARKPLUG_MQTT_USERNAME:}'
+  username: ''                     # the MQTT user (empty: a server without login)
   password: '${env:SPARKPLUG_MQTT_PASSWORD:}'
   # security:                      # TLS settings (protocols/mqtt_security.py)
   #   ca_cert_path: /certs/ca.pem
@@ -116,17 +116,16 @@ sources:
     check_views: true              # after each create_edge_node_schema call: the edge node's schema and views exist (else retried)
 zerobus:
   enabled: true
-  workspace_host: '${env:DATABRICKS_HOST}'
-  zerobus_endpoint: '${env:ZEROBUS_ENDPOINT}'
+  zerobus_endpoint: ''             # <workspace-id>.zerobus.<region>.cloud.databricks.com
   default_target:                  # the table of every source without a target_table of its own
-    workspace_host: '${env:DATABRICKS_HOST}'
+    workspace_host: ''             # https://<workspace>.cloud.databricks.com
     catalog: bridge_stage_db
     schema: stage_db
     table: sparkplug_raw
   auth:
     # or the encrypted credential store: ${credential:zerobus.client_id} / ${credential:zerobus.client_secret}
     # (python -m sparkplug_connector.core.credential_manager store ...)
-    client_id: '${env:DATABRICKS_CLIENT_ID}'
+    client_id: ''                  # the service principal's application id
     client_secret: '${env:DATABRICKS_CLIENT_SECRET}'
   drain_timeout_seconds: 15        # on shutdown: how long the queued rows may take to be written
   wal:                             # a write-ahead log per table: rows survive a crash or a cut-short stop

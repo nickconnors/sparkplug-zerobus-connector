@@ -142,7 +142,7 @@ zerobus:
 ```
 
 The package's `config/config.yaml` has this source as `sparkplug-example` (off): enable it and set its
-table, endpoint and credentials there (its header lists the environment variables). Run **exactly one** primary host per Primary Host ID: a second
+table, endpoint and MQTT user there (its header says what to set; the secrets come from the environment). Run **exactly one** primary host per Primary Host ID: a second
 one with the same id fights over STATE, and two connectors with different ids write every row twice.
 
 ### The edge (MQTT Transmission)

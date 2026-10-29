@@ -12,8 +12,7 @@ from sparkplug_connector.core import bridge as core_bridge
 from sparkplug_connector.core.config_loader import ConfigLoader
 
 EXAMPLE = pathlib.Path(core_bridge.__file__).resolve().parents[1] / "config" / "config.yaml"
-ENV = {"ZEROBUS_ENDPOINT": "123.zerobus.region.cloud.databricks.com", "DATABRICKS_HOST": "https://example.cloud.databricks.com",
-       "DATABRICKS_CLIENT_ID": "id", "DATABRICKS_CLIENT_SECRET": "secret"}
+ENV = {"DATABRICKS_CLIENT_SECRET": "secret"}      # the secrets only; the rest is written into the file
 
 
 class FakeRowStreams:
@@ -25,24 +24,33 @@ class FakeRowStreams:
 
 
 def example(monkeypatch, tmp_path) -> dict:
+    """The example as the README's step 2 edits it: the workspace, the Zerobus endpoint and the client id set."""
     for k, v in ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("HOME", str(tmp_path))      # the credential manager's directory
     monkeypatch.chdir(tmp_path)                    # log and write-ahead log paths
     monkeypatch.setattr(core_bridge, "ZerobusRowStreams", FakeRowStreams)
-    return ConfigLoader(config_path=EXAMPLE).load()
+    config = ConfigLoader(config_path=EXAMPLE).load()
+    config["zerobus"].update(zerobus_endpoint="123.zerobus.region.cloud.databricks.com")
+    config["zerobus"]["default_target"]["workspace_host"] = "https://example.cloud.databricks.com"
+    config["zerobus"]["auth"]["client_id"] = "id"
+    return config
 
 
 def test_the_example_has_one_sparkplug_source_off_and_no_workspace_values_or_secrets():
+    """Only the secrets come from the environment; the endpoints, the workspace, the client id and the MQTT user are
+    written into the file (empty in the example), once each."""
     config = ConfigLoader(config_path=EXAMPLE).load_raw()
     assert [(s["protocol"], s["enabled"]) for s in config["sources"]] == [("sparkplug", False)]
     source = config["sources"][0]
-    assert source["endpoint"].startswith("${env:SPARKPLUG_MQTT_ENDPOINT")
-    assert source["username"].startswith("${env:") and source["password"].startswith("${env:")
+    assert (source["endpoint"], source["username"], source["password"]) == ("", "", "${env:SPARKPLUG_MQTT_PASSWORD:}")
     zerobus = config["zerobus"]
-    assert zerobus["zerobus_endpoint"] == "${env:ZEROBUS_ENDPOINT}"
-    assert zerobus["workspace_host"] == zerobus["default_target"]["workspace_host"] == "${env:DATABRICKS_HOST}"
-    assert zerobus["auth"] == {"client_id": "${env:DATABRICKS_CLIENT_ID}", "client_secret": "${env:DATABRICKS_CLIENT_SECRET}"}
+    assert zerobus["zerobus_endpoint"] == zerobus["default_target"]["workspace_host"] == ""
+    assert "workspace_host" not in zerobus                  # the default target's is the one the bridge reads
+    assert zerobus["auth"] == {"client_id": "", "client_secret": "${env:DATABRICKS_CLIENT_SECRET}"}
+    assert config["web_ui"]["authentication"]["oauth"]["workspace_host"] == ""
+    assert set(re.findall(r"\$\{env:([A-Z_]+)", EXAMPLE.read_text())) == {"DATABRICKS_CLIENT_SECRET",
+                                                                         "SPARKPLUG_MQTT_PASSWORD"}
     for gone in ("monitoring", "discovery", "normalization", "numeric_compression"):
         assert gone not in config
     assert "disk_spool" not in config["backpressure"] and "confirmed_writes" not in zerobus
